@@ -47,6 +47,9 @@ ERASURE_SETTLE = timedelta(minutes=15)      # let the vendor ingest the profile 
 ERASURE_VERIFY_INTERVAL = timedelta(hours=24)
 ERASURE_MAX_BACKOFF = timedelta(hours=24)
 ERASURE_BATCH = 20
+#: After this many "profile not ingested" checks the marker is sent again
+#: (an accepted-but-dropped marker must not strand a job; review B-4).
+REMATERIALIZE_AFTER = 6
 #: Wall-clock budget for vendor calls in one erasure pass (each call is also
 #: bounded by the transport deadline), so the job-row transaction stays short.
 ERASURE_PASS_BUDGET_SECONDS = 60.0
@@ -66,12 +69,21 @@ def _mark_exposure(owners, now):
     withdrawal, purge or another pass) is skipped, never waited on, so one
     busy account cannot stall dispatch for everyone else (PG-qualified)."""
     if owners:
+        sendable = (db.session.query(ProductAnalyticsOutbox.id)
+                    .filter(ProductAnalyticsOutbox.user_id == ProductAnalyticsConsent.user_id,
+                            ProductAnalyticsOutbox.generation == ProductAnalyticsConsent.generation,
+                            ProductAnalyticsOutbox.subject == ProductAnalyticsConsent.subject,
+                            ProductAnalyticsOutbox.next_attempt_at <= now)
+                    .exists())
+        # Only a subject that has a sendable row is marked (review B-7): a
+        # subject whose rows will all be fenced never gets a vendor profile.
         ids = [row_id for (row_id,) in (
             db.session.query(ProductAnalyticsConsent.id)
             .filter(ProductAnalyticsConsent.user_id.in_(owners),
                     ProductAnalyticsConsent.status == consent.GRANTED,
                     ProductAnalyticsConsent.subject.isnot(None),
-                    ProductAnalyticsConsent.vendor_exposed_at.is_(None))
+                    ProductAnalyticsConsent.vendor_exposed_at.is_(None),
+                    sendable)
             .order_by(ProductAnalyticsConsent.id)
             .with_for_update(skip_locked=True).all())]
         if ids:
@@ -204,6 +216,8 @@ def process_erasures_once(transport, *, limit=ERASURE_BATCH, now=None, overdue=N
                 continue
             if ref is None:
                 _backoff(job, now, "profile_not_ingested")
+                if job.attempts % REMATERIALIZE_AFTER == 0:
+                    job.status = "pending"          # re-send the profile marker
                 stats["waiting"] += 1
             else:
                 job.vendor_person_ref = ref

@@ -75,8 +75,10 @@ def test_incomplete_or_invalid_vendor_configuration_builds_no_transport(override
 
 
 def test_erasure_needs_its_own_complete_credentials_and_repr_hides_secrets():
-    capture_only = settings.vendor_settings({**FULL, settings.PERSONAL_API_KEY: "bad"})
-    assert capture_only is not None and not capture_only.can_erase
+    # Review B-1: nothing is captured that could not be erased.
+    for broken in ({settings.PERSONAL_API_KEY: "bad"}, {settings.PERSONAL_API_KEY: ""},
+                   {settings.PROJECT_ID: "x1"}):
+        assert settings.vendor_settings({**FULL, **broken}) is None
     full = settings.vendor_settings(FULL)
     assert full.can_erase and full.connect_timeout == 3.0 and full.read_timeout == 10.0
     for value in (repr(full), str(full), repr(posthog_transport.build(full))):
@@ -185,8 +187,12 @@ def test_unverified_or_foreign_deletion_status_is_never_success():
         assert transport.deletion_verified("person-1") is False
 
 
-def test_capture_only_configuration_cannot_call_the_private_api():
-    transport, vendor = _transport(config={**FULL, settings.PERSONAL_API_KEY: ""})
+def test_a_transport_without_erasure_credentials_cannot_call_the_private_api():
+    session = posthog_transport._new_session()
+    vendor = FakeVendor()
+    session.mount("https://", vendor)
+    transport = posthog_transport.PostHogTransport(
+        settings.VendorSettings(TOKEN, None, None, 3.0, 10.0), session=session)
     assert not transport.can_erase
     for call in (lambda: transport.find_person("s"), lambda: transport.bulk_delete(["s"]),
                  lambda: transport.deletion_verified("r")):
@@ -485,3 +491,62 @@ def test_a_subject_minted_after_the_exposure_marker_is_never_sent_unmarked(on, m
     second = consent.current(user.id)
     assert second.vendor_exposed_at is not None and second.subject != first
     assert ProductAnalyticsErasure.query.one().status == "pending"
+
+
+def test_dispatch_never_runs_on_a_transport_that_cannot_erase(on, make_user):
+    user = make_user("analytics-no-erasure")
+    _granted(user.id)
+    transport = SyntheticTransport()
+    transport.can_erase = False
+    stats = pipeline.run_pass(transport=transport, config={})
+    assert "sent" not in stats and transport.sent == []
+
+
+def test_dispatch_loop_respects_its_wall_clock_budget(on, make_user, monkeypatch):
+    user = make_user("analytics-dispatch-budget")
+    _granted(user.id)
+    calls = []
+    monkeypatch.setattr(dispatch, "dispatch_once",
+                        lambda *a, **k: calls.append(1) or {"sent": 1, "fenced": 0, "retry": 0,
+                                                            "dropped": 0, "skipped": 0})
+    ticks = iter([0.0] + [0.0, 0.0, pipeline.DISPATCH_BUDGET_SECONDS + 1] + [999.0] * 30)
+    pipeline.run_pass(transport=SyntheticTransport(), config={}, clock=lambda: next(ticks))
+    assert len(calls) == 2
+
+
+def test_a_subject_whose_rows_are_all_fenced_is_never_marked_exposed(on, make_user):
+    user = make_user("analytics-fenced-only")
+    _granted(user.id)
+    row = consent.current(user.id)
+    ProductAnalyticsOutbox.query.delete()
+    now = datetime.utcnow()
+    db.session.add(ProductAnalyticsOutbox(
+        user_id=user.id, generation=row.generation - 1, subject=row.subject,
+        event_id=str(uuid.uuid4()), name="axis_v2_app_opened", authority="client",
+        occurred_at=now, received_at=now, properties="{}", attempts=0, next_attempt_at=now))
+    db.session.commit()
+    stats = dispatch.dispatch_once(SyntheticTransport())
+    assert stats["fenced"] == 1 and consent.current(user.id).vendor_exposed_at is None
+    consent.withdraw(user.id)
+    assert ProductAnalyticsErasure.query.one().status == "not_required"
+
+
+def test_a_marker_that_is_never_ingested_is_sent_again(on, make_user):
+    user = make_user("analytics-rematerialize")
+    _granted(user.id, exposed=True)
+    consent.withdraw(user.id)
+    transport = SyntheticTransport(ingest_profiles=False)
+    now = datetime.utcnow()
+    dispatch.process_erasures_once(transport, now=now)
+    markers = len(transport.sent)
+    for day in range(1, dispatch.REMATERIALIZE_AFTER + 2):
+        dispatch.process_erasures_once(transport, now=now + timedelta(days=day))
+    assert len(transport.sent) > markers
+    assert ProductAnalyticsErasure.query.one().status in ("pending", "materialized")
+
+
+def test_person_reference_prefers_the_uuid_field():
+    subject = "s-1"
+    transport, _ = _transport(lambda request: (200, json.dumps({"results": [
+        {"id": 12345, "uuid": "0190-person", "distinct_ids": [subject]}]}).encode()))
+    assert transport.find_person(subject) == "0190-person"

@@ -142,13 +142,21 @@ class PostHogTransport:
         results = value.get("results") if isinstance(value, dict) else None
         if status != 200 or not isinstance(results, list):
             raise TransportFailure("malformed_response")
+        def ref(item):
+            # The person UUID is what deletion_status is keyed by; accept
+            # either a "uuid" field or a string "id" (shape verified at G5).
+            for key in ("uuid", "id"):
+                value = item.get(key)
+                if isinstance(value, str) and value:
+                    return value[:64]
+            return None
         matches = [item for item in results
-                   if isinstance(item, dict) and isinstance(item.get("id"), str)
+                   if isinstance(item, dict) and ref(item) is not None
                    and isinstance(item.get("distinct_ids"), list)
                    and subject in item["distinct_ids"]]
         if len(matches) > 1:
             raise TransportFailure("ambiguous_person")
-        return matches[0]["id"][:64] if matches else None
+        return ref(matches[0]) if matches else None
 
     def bulk_delete(self, subjects):
         subjects = list(subjects)

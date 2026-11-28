@@ -2,7 +2,9 @@
 
 **State:** production-capable source, **default-unreachable**. No PostHog
 project, token or key exists for any environment. Missing or invalid
-configuration means no transport object, so no vendor call happens. Qualified
+configuration means no transport object, so no vendor call happens. Capture
+requires complete **erasure** credentials too (independent review B-1):
+nothing is ever sent that could not be erased. Qualified
 with synthetic transports, an in-process HTTPS adapter, a loopback slow endpoint
 and real PostgreSQL 16. No live vendor request was ever made.
 
@@ -20,7 +22,12 @@ Request discipline:
 * TLS is verified. Redirects are refused (3xx = failure). Plain `http://` is
   refused by adapter. `trust_env=False` (no proxy, netrc or CA overrides from
   the environment).
-* Timeouts: connect 3 s (0.5–5) and read 10 s (1–15), plus an overall deadline.
+* Timeouts: connect 3 s (0.5–5) and read 10 s (1–15), plus an overall
+  deadline on reading the body. **True bound (review B-3):** DNS resolution
+  is not covered by `requests` timeouts, and the connect timeout applies per
+  resolved address. So the worst case is resolver time + connect × addresses
+  + read. Deployment must set a resolver timeout (e.g. `options timeout:2
+  attempts:1` in the worker's resolv.conf) before activation; this is gate G3/G5.
 * No transport-level retries: the outbox owns bounded retries. Response bodies
   are capped at 64 KiB.
 * Failures carry fixed codes only (`timeout`, `network`, `vendor_retry`,
@@ -82,7 +89,22 @@ that person.
    Locks are held across ONE bounded send. Then commit (delete sent rows, or
    apply backoff).
 3. **Bounds.** 5 attempts with exponential backoff from 30 s. At most 20
-   batches of ≤ 50 rows per pass.
+   batches of ≤ 50 rows per pass, with a 150 s dispatch wall-clock budget
+   after the 60 s erasure budget. Erasure runs first, so one pass stays
+   inside the 300 s RQ timeout (review B-2).
+4. **Exposure** is marked only for a subject that has a sendable row (current
+   generation and subject, due). A subject whose rows are all fenced never
+   gets a vendor profile (review B-7).
+
+Known transient limits (review P3, accepted):
+
+* One owner with ≥ 50 due rows whose consent row is locked can occupy a
+  pass's candidate window, so others wait for the next pass (B-5).
+* Overlapping DELETEs can deadlock and PostgreSQL then aborts one side:
+  outbox expiry against a withdrawal/purge delete, or the pre-existing grant
+  vs purge FK-share cycle. A withdrawal is retried durably by the device. An
+  outbox `user_id` index now keeps per-user deletes and the FK cascade from
+  seq-scanning (B-6).
 
 Lock order everywhere is **consent → outbox**: withdrawal, account purge (now
 locks consent first), rotation and dispatch. PG-qualified outcomes:
@@ -101,6 +123,9 @@ deleted ≥ requested) `requested` → (`deletion_status` reports
 `delete_verified_at`) `verified`.
 
 * `not_required` = the subject was never sent.
+* If the person is still "not ingested" after 6 checks, the marker is sent
+  again (an accepted but dropped marker cannot strand a job). The person
+  reference prefers `uuid`, then a string `id` (B-4; shape verified at G5).
 * A job is never terminal-failed. Backoff is capped at 24 h, and unfinished
   jobs older than the overdue threshold are counted and logged.
 * Each pass has a 60 s vendor-call budget, so the job-row transaction stays

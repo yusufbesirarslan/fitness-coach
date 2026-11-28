@@ -69,6 +69,7 @@ def _create_outbox():
     )
     op.create_index("ix_product_analytics_outbox_due", "product_analytics_outbox",
                     ["next_attempt_at", "id"])
+    op.create_index("ix_product_analytics_outbox_user", "product_analytics_outbox", ["user_id"])
 
 
 def _create_erasure():
@@ -142,6 +143,7 @@ def downgrade():
         if connection.execute(sa.text(f"SELECT 1 FROM {table} LIMIT 1")).scalar():
             raise RuntimeError(f"{table} downgrade would lose analytics consent or erasure state")
     op.drop_index("ix_product_analytics_erasure_due", table_name="product_analytics_erasure")
+    op.drop_index("ix_product_analytics_outbox_user", table_name="product_analytics_outbox")
     op.drop_index("ix_product_analytics_outbox_due", table_name="product_analytics_outbox")
     for table in reversed(_TABLES):
         op.drop_table(table)

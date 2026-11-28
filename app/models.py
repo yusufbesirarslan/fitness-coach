@@ -1471,6 +1471,7 @@ class ProductAnalyticsOutbox(db.Model):
         db.CheckConstraint("authority IN ('server', 'client')",
                            name="ck_product_analytics_outbox_authority"),
         db.Index("ix_product_analytics_outbox_due", "next_attempt_at", "id"),
+        db.Index("ix_product_analytics_outbox_user", "user_id"),
     )
 
 

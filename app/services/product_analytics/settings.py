@@ -81,7 +81,7 @@ def _bounded(config, key, low, high, default=None, cast=float):
 
 
 def vendor_settings(config):
-    """Complete, valid capture settings or None (fail closed)."""
+    """Complete, valid capture AND erasure settings, or None (fail closed)."""
     if _text(config, REGION) != "eu":
         return None
     token = _text(config, PROJECT_TOKEN)
@@ -94,7 +94,9 @@ def vendor_settings(config):
     project = _text(config, PROJECT_ID)
     personal = _text(config, PERSONAL_API_KEY)
     if not (project and _PROJECT.fullmatch(project) and personal and _PERSONAL.fullmatch(personal)):
-        project = personal = None   # capture may run; vendor erasure may not
+        # Review B-1: never capture what could not be erased. Incomplete
+        # erasure credentials mean no transport at all (fail closed).
+        return None
     return VendorSettings(token, project, personal, connect, read)
 
 
