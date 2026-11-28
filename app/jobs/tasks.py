@@ -184,6 +184,22 @@ def run_daily_maintenance(now_iso):
     return _in_app_context(_body)
 
 
+def run_product_analytics_pass():
+    """Product analytics v2 worker pass (cleanup, dispatch, vendor erasure).
+
+    Generic wakeup: the payload carries no owner, pseudonym or event. Failures
+    are logged by exception type only (raw SQL/HTTP errors can carry data)."""
+    from app.services.product_analytics.pipeline import run_pass
+    from rq.timeouts import JobTimeoutException
+    try:
+        return _in_app_context(run_pass)
+    except JobTimeoutException:
+        raise
+    except Exception as error:
+        _log.warning("product_analytics event=pass_failed type=%s", type(error).__name__)
+        return None
+
+
 def process_weekly_checkin_reviews():
     """Generic RQ wakeup. Its payload carries no owner or health information."""
     from app.services.weekly_review.operations import drain

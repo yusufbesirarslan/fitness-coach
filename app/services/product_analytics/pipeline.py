@@ -1,0 +1,59 @@
+"""One worker-side analytics pass: retention cleanup, dispatch, vendor erasure.
+
+Scheduled by the worker heartbeat (``worker.py``) as a single unique RQ job,
+also runnable as ``flask product-analytics-run``. Never runs in a request.
+
+* Cleanup always runs (AxisAI-side retention only; no vendor call).
+* Dispatch runs only while ``FITX_PRODUCT_ANALYTICS_ENABLED`` is ON and a
+  complete vendor configuration exists.
+* Vendor erasure runs whenever erasure configuration exists, also while the
+  flag is OFF (a rollback must not strand deletions owed for data already sent).
+* Missing configuration: no vendor call at all (fail closed).
+
+Logs carry counts and fixed outcome codes only.
+"""
+import os
+from collections import ChainMap
+from datetime import datetime
+
+from flask import current_app
+
+from app.services import product_analytics
+from app.services.product_analytics import dispatch, posthog_transport, retention, settings
+
+MAX_DISPATCH_BATCHES = 20
+
+
+def configured_transport(config):
+    return posthog_transport.build(settings.vendor_settings(config))
+
+
+def run_pass(*, transport=None, now=None, config=None):
+    # App config wins; deployment secrets otherwise arrive as environment.
+    config = config if config is not None else ChainMap(current_app.config, os.environ)
+    now = now or datetime.utcnow()
+    policy = settings.retention_policy(config)
+    stats = {"vendor": "unconfigured", **retention.cleanup(policy, now=now)}
+    transport = transport if transport is not None else configured_transport(config)
+    if transport is not None:
+        stats["vendor"] = "configured"
+        if product_analytics.enabled() and transport.can_capture:
+            totals = {"sent": 0, "fenced": 0, "retry": 0, "dropped": 0, "skipped": 0}
+            for _ in range(MAX_DISPATCH_BATCHES):
+                step = dispatch.dispatch_once(transport, now=now, max_age=policy.outbox_max_age)
+                for key in totals:
+                    totals[key] += step[key]
+                if step["sent"] + step["fenced"] + step["dropped"] == 0:
+                    break
+            stats.update(totals)
+        if transport.can_erase:
+            erasure = dispatch.process_erasures_once(transport, now=now,
+                                                     overdue=policy.erasure_overdue)
+            stats.update({f"erasure_{key}": value for key, value in erasure.items()})
+    current_app.logger.info(
+        "product_analytics event=pass %s",
+        " ".join(f"{key}={stats[key]}" for key in sorted(stats)))
+    if stats.get("erasure_overdue"):
+        current_app.logger.error("product_analytics event=erasure_overdue count=%d",
+                                 stats["erasure_overdue"])
+    return stats

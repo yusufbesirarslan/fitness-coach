@@ -6,6 +6,7 @@ screen, IP-derived or person property is ever added. Server-side capture also
 means the vendor sees AxisAI's egress address, never the user's.
 """
 import json
+import uuid
 from datetime import timezone
 
 from app.services.product_analytics.catalog import EVENTS, WIRE
@@ -36,3 +37,22 @@ def build_batch(api_key, rows):
 
 def encode(batch):
     return json.dumps(batch, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def erasure_profile_batch(api_key, subjects, now):
+    """The documented PostHog deletion prerequisite for personless events.
+
+    Events captured with ``$process_person_profile: false`` "have no person to
+    delete" (posthog.com/docs/privacy/data-storage). For a RETIRED pseudonym
+    only, one ``$set`` event creates a profile so the bulk delete can remove
+    the person and its events. The only person property is a fixed marker;
+    it is never sent for a live grant and never carries account data.
+    """
+    spec = WIRE["erasure_profile_event"]
+    return {"api_key": api_key, "batch": [{
+        "event": spec["event"],
+        "distinct_id": subject,
+        "uuid": str(uuid.uuid4()),
+        "timestamp": _timestamp(now),
+        "properties": dict(spec["properties"]),
+    } for subject in subjects]}

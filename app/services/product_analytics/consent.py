@@ -98,6 +98,7 @@ def grant(user_id, notice_version, *, now=None):
             row.generation += 1
             row.subject = str(uuid.uuid4())
             row.grant_id = str(uuid.uuid4())
+            row.vendor_exposed_at = None
         row.status = GRANTED
         row.notice_version = notice_version
         row.granted_at = now
@@ -117,12 +118,22 @@ def grant(user_id, notice_version, *, now=None):
 
 
 def _retire_subject(row, reason, now):
-    """Record the durable vendor-erasure job for the subject being retired."""
+    """Record the durable vendor-erasure job for the subject being retired.
+
+    The caller holds the consent row lock. Dispatch commits
+    ``vendor_exposed_at`` BEFORE any send under that subject, so a subject
+    that was never exposed provably has nothing at the vendor and its job is
+    settled as ``not_required`` without any vendor call (no profile is ever
+    created for it)."""
     if row.subject and ProductAnalyticsErasure.query.filter_by(
             subject=row.subject).one_or_none() is None:
-        db.session.add(ProductAnalyticsErasure(subject=row.subject, reason=reason,
-                                               status="pending", attempts=0,
-                                               requested_at=now))
+        exposed = row.vendor_exposed_at is not None
+        db.session.add(ProductAnalyticsErasure(
+            subject=row.subject, reason=reason,
+            status="pending" if exposed else "not_required", attempts=0,
+            requested_at=now, next_attempt_at=now,
+            last_outcome=None if exposed else "never_exposed",
+            completed_at=None if exposed else now))
 
 
 def withdraw(user_id, *, now=None):
@@ -142,6 +153,7 @@ def withdraw(user_id, *, now=None):
         row.withdrawn_at = now
         row.granted_at = None
         row.expires_at = None
+        row.vendor_exposed_at = None
         row.updated_at = now
         db.session.commit()
         return view(row, now)
@@ -152,7 +164,11 @@ def withdraw(user_id, *, now=None):
 
 def enqueue_account_erasure(user_id, *, now=None):
     """Inside the account purge transaction (no commit): queue vendor erasure
-    for the live subject BEFORE the mapping row is deleted with the account."""
-    row = ProductAnalyticsConsent.query.filter_by(user_id=user_id).one_or_none()
+    for the live subject BEFORE the mapping row is deleted with the account.
+
+    Takes the consent row lock first, the same order as withdrawal and
+    dispatch (consent, then outbox), so an in-flight send finishes or is fenced
+    and the purge never deadlocks against the dispatcher."""
+    row = current(user_id, lock=True)
     if row is not None and row.subject:
         _retire_subject(row, "account_deleted", now or _now())

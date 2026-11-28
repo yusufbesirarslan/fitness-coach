@@ -1430,6 +1430,10 @@ class ProductAnalyticsConsent(db.Model):
     expires_at = db.Column(db.DateTime)
     withdrawn_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    # Committed BEFORE the first vendor send for the current subject (an
+    # unacknowledged send counts). Reset with every new subject. Erasure of a
+    # subject that was never exposed needs no vendor call at all.
+    vendor_exposed_at = db.Column(db.DateTime)
 
     __table_args__ = (
         db.UniqueConstraint("user_id", name="uq_product_analytics_consent_user"),
@@ -1469,11 +1473,19 @@ class ProductAnalyticsOutbox(db.Model):
 
 
 class ProductAnalyticsErasure(db.Model):
-    """Durable vendor-erasure job for one retired analytics pseudonym.
+    """Durable vendor-erasure job and receipt for one retired analytics pseudonym.
 
     No user FK on purpose (like ``HealthErasure``): it is created in the same
     transaction that withdraws consent or purges the account and must outlive
     the account-to-subject mapping it replaces.
+
+    Lifecycle (``status``): ``pending`` -> ``materialized`` (the documented
+    PostHog workaround: personless events have no person to delete, so a
+    profile is created for the pseudonym first) -> ``requested`` (bulk delete
+    accepted, events queued) -> ``verified`` (the vendor reports the deletion
+    verified). ``not_required``: the pseudonym was never sent to the vendor.
+    Only ``verified`` and ``not_required`` are terminal; receipts are purged
+    after the configured receipt retention.
     """
     __tablename__ = "product_analytics_erasure"
 
@@ -1483,14 +1495,20 @@ class ProductAnalyticsErasure(db.Model):
     status = db.Column(db.String(16), nullable=False, default="pending")
     attempts = db.Column(db.Integer, nullable=False, default=0)
     requested_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    next_attempt_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    vendor_person_ref = db.Column(db.String(64))
+    vendor_requested_at = db.Column(db.DateTime)
+    last_outcome = db.Column(db.String(24))
     completed_at = db.Column(db.DateTime)
 
     __table_args__ = (
         db.UniqueConstraint("subject", name="uq_product_analytics_erasure_subject"),
         db.CheckConstraint("reason IN ('withdrawn', 'account_deleted')",
                            name="ck_product_analytics_erasure_reason"),
-        db.CheckConstraint("status IN ('pending', 'done')",
+        db.CheckConstraint("status IN ('pending', 'materialized', 'requested', 'verified', "
+                           "'not_required')",
                            name="ck_product_analytics_erasure_status"),
+        db.Index("ix_product_analytics_erasure_due", "status", "next_attempt_at"),
     )
 
 

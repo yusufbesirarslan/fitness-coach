@@ -6,7 +6,12 @@
   "vendor_wire_allowlist": {
     "batch": ["api_key", "batch"],
     "event": ["event", "distinct_id", "uuid", "timestamp", "properties"],
-    "fixed_properties": {"$process_person_profile": false, "$geoip_disable": true}
+    "fixed_properties": {"$process_person_profile": false, "$geoip_disable": true},
+    "erasure_profile_event": {
+      "event": "$set",
+      "properties": {"$set": {"axis_v2_erasure": "requested"}, "$geoip_disable": true},
+      "use": "Retired pseudonyms only (withdrawal / account deletion), immediately before the vendor bulk delete. PostHog documents that events without a person profile cannot be removed by the person deletion tools; this is its documented workaround. Never sent for a live grant."
+    }
   },
   "client_envelope": {
     "keys": ["schema_version", "consent_grant", "events"],
@@ -114,7 +119,7 @@
     "signup_completed": "No analytics consent can exist before an account exists; N/A.",
     "client *_observed success events (v1)": "Client projections never count as committed backend success; superseded by server authority events.",
     "food_log / nutrition contents": "Nutrition contents are excluded; Nutrition WRITE events require separate review once the Coach Nutrition writer exists.",
-    "person/profile properties, $set, identify, alias, groups": "No person profiles; no direct account identifiers.",
+    "person/profile properties, $set, identify, alias, groups": "No person profiles for live grants; no direct account identifiers. Sole exception: the fixed erasure_profile_event for a RETIRED pseudonym, required to delete its events.",
     "device/OS/app/locale/timezone/network/screen metadata": "Not sent; server-mediated wire carries only the allowlist above."
   }
 }

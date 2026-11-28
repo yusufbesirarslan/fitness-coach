@@ -169,8 +169,22 @@ def test_withdraw_is_idempotent_and_queues_one_vendor_erasure(on, client, owner)
         assert client.put("/api/v1/analytics/consent", headers=owner.headers(),
                           json={"decision": "withdraw"}).status_code == 200
     jobs = ProductAnalyticsErasure.query.all()
-    assert [(j.subject, j.reason, j.status) for j in jobs] == [(subject, "withdrawn", "pending")]
+    # Never dispatched: nothing reached the vendor, settled without any vendor call.
+    assert [(j.subject, j.reason, j.status) for j in jobs] == [(subject, "withdrawn", "not_required")]
+    assert jobs[0].completed_at is not None and jobs[0].last_outcome == "never_exposed"
     assert _outbox(owner.id) == []
+
+
+def test_withdrawal_after_exposure_queues_a_pending_vendor_erasure(on, client, owner):
+    _grant(client, owner)
+    subject = _row(owner.id).subject
+    dispatch.dispatch_once(SyntheticTransport(fail=True))      # unacknowledged send = exposure
+    assert _row(owner.id).vendor_exposed_at is not None
+    client.put("/api/v1/analytics/consent", headers=owner.headers(), json={"decision": "withdraw"})
+    jobs = ProductAnalyticsErasure.query.all()
+    assert [(j.subject, j.status, j.completed_at) for j in jobs] == [(subject, "pending", None)]
+    _grant(client, owner)
+    assert _row(owner.id).vendor_exposed_at is None            # new subject starts unexposed
 
 
 # ── Client ingress: strict validation, account fence, dedup ───────────────
@@ -333,15 +347,18 @@ def test_every_server_event_has_exactly_the_reviewed_emitters():
     assert set(expected) == catalog.SERVER_EVENTS
 
 
-def test_package_has_no_network_or_vendor_sdk_path():
+def test_only_the_posthog_transport_may_reach_the_network_and_no_vendor_sdk_exists():
     banned = {"requests", "urllib", "urllib3", "httpx", "http", "socket", "posthog", "boto3", "aiohttp"}
+    network = {}
     for path in (ROOT / "app/services/product_analytics").glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             names = ([a.name for a in node.names] if isinstance(node, ast.Import)
                      else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
             for name in names:
-                assert name.split(".")[0] not in banned, (path.name, name)
+                if name.split(".")[0] in banned:
+                    network.setdefault(path.name, set()).add(name)
+    assert network == {"posthog_transport.py": {"requests", "requests.adapters"}}
 
 
 # ── Wire, fenced dispatch, retries, erasure ───────────────────────────────
@@ -416,11 +433,14 @@ def test_retries_are_bounded(on, client, owner):
 
 def test_vendor_erasure_jobs_for_withdrawal_and_account_deletion(on, client, owner, make_user,
                                                                 principal):
+    transport = SyntheticTransport()
     _grant(client, owner)
     first = _row(owner.id).subject
+    assert dispatch.dispatch_once(transport)["sent"] == 1
     client.put("/api/v1/analytics/consent", headers=owner.headers(), json={"decision": "withdraw"})
     _grant(client, owner)
     second = _row(owner.id).subject
+    assert dispatch.dispatch_once(transport)["sent"] == 1
     from app.cli import _purge_user
     _purge_user(db.session.get(User, owner.id))
     db.session.commit()
@@ -428,10 +448,25 @@ def test_vendor_erasure_jobs_for_withdrawal_and_account_deletion(on, client, own
     jobs = {(j.subject, j.reason) for j in ProductAnalyticsErasure.query.all()}
     assert jobs == {(first, "withdrawn"), (second, "account_deleted")}
     assert not hasattr(ProductAnalyticsErasure, "user_id")
-    transport = SyntheticTransport()
-    assert dispatch.process_erasures_once(transport) == 2
+    now = datetime.utcnow()
+    assert dispatch.process_erasures_once(transport, now=now)["materialized"] == 2
+    markers = [item for item in json.loads(transport.sent[-1])["batch"]]
+    assert {m["distinct_id"] for m in markers} == {first, second}
+    assert all(m["event"] == "$set" and m["properties"] == {
+        "$set": {"axis_v2_erasure": "requested"}, "$geoip_disable": True} for m in markers)
+    assert dispatch.process_erasures_once(transport, now=now)["requested"] == 0   # settling
+    later = now + dispatch.ERASURE_SETTLE
+    assert dispatch.process_erasures_once(transport, now=later)["requested"] == 2
     assert sorted(transport.deleted[0]) == sorted([first, second])
-    assert {j.status for j in ProductAnalyticsErasure.query.all()} == {"done"}
+    statuses = {j.status for j in ProductAnalyticsErasure.query.all()}
+    assert statuses == {"requested"}                       # never claimed before verification
+    verify_at = later + dispatch.ERASURE_VERIFY_INTERVAL
+    assert dispatch.process_erasures_once(transport, now=verify_at)["waiting"] == 2
+    transport.verify_all()
+    verify_at += dispatch.ERASURE_VERIFY_INTERVAL
+    assert dispatch.process_erasures_once(transport, now=verify_at)["verified"] == 2
+    db.session.expire_all()
+    assert {j.status for j in ProductAnalyticsErasure.query.all()} == {"verified"}
 
 
 def test_ingress_parser_rejects_non_json_and_oversize_without_echo():

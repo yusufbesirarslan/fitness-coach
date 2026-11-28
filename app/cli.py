@@ -766,6 +766,12 @@ def health_erasure_run_cmd(limit):
     click.echo(json.dumps(health_erasure.run_pending(limit), sort_keys=True))
 
 
+def product_analytics_run_cmd():
+    """Run ONE product analytics v2 pass (cleanup, dispatch, vendor erasure); prints counts."""
+    from app.services.product_analytics.pipeline import run_pass
+    click.echo(json.dumps(run_pass(), sort_keys=True))
+
+
 @click.option("--user-id", required=True, type=int)
 @click.option("--matter", required=True, help="Documented claim/request reference (no health content).")
 @click.option("--review-date", required=True, help="YYYY-MM-DD: when the hold must be reviewed.")
@@ -847,6 +853,7 @@ def register_cli(app):
     app.cli.command("account-deletion-audit-export")(account_deletion_audit_export_cmd)
     app.cli.command("account-deletion-reconcile")(account_deletion_reconcile_cmd)
     app.cli.command("health-erasure-run")(health_erasure_run_cmd)
+    app.cli.command("product-analytics-run")(product_analytics_run_cmd)
     app.cli.command("health-legal-hold-add")(health_legal_hold_add_cmd)
     app.cli.command("health-legal-hold-release")(health_legal_hold_release_cmd)
     app.cli.command("health-legal-hold-list")(health_legal_hold_list_cmd)

@@ -3,7 +3,8 @@
 Revision ID: 6e25ecb68c09
 Revises: e6a4b91d702c
 
-Expand only: three new, empty tables. Nothing existing changes and no code
+Expand only: three new, empty tables (erasure rows carry the full vendor
+receipt lifecycle; consent carries the vendor-exposure marker). Nothing existing changes and no code
 path writes them while FITX_PRODUCT_ANALYTICS_ENABLED is OFF (default).
 INTEGRATION NOTE: this lane was cut from #568 (head e6a4b91d702c); the
 integration owner re-points ``down_revision`` once, at composition, so the
@@ -38,6 +39,7 @@ def _create_consent():
         sa.Column("expires_at", sa.DateTime()),
         sa.Column("withdrawn_at", sa.DateTime()),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
+        sa.Column("vendor_exposed_at", sa.DateTime()),
         sa.UniqueConstraint("user_id", name="uq_product_analytics_consent_user"),
         sa.CheckConstraint("status IN ('granted', 'withdrawn')",
                            name="ck_product_analytics_consent_status"),
@@ -77,13 +79,20 @@ def _create_erasure():
         sa.Column("status", sa.String(16), nullable=False),
         sa.Column("attempts", sa.Integer(), nullable=False),
         sa.Column("requested_at", sa.DateTime(), nullable=False),
+        sa.Column("next_attempt_at", sa.DateTime(), nullable=False),
+        sa.Column("vendor_person_ref", sa.String(64)),
+        sa.Column("vendor_requested_at", sa.DateTime()),
+        sa.Column("last_outcome", sa.String(24)),
         sa.Column("completed_at", sa.DateTime()),
         sa.UniqueConstraint("subject", name="uq_product_analytics_erasure_subject"),
         sa.CheckConstraint("reason IN ('withdrawn', 'account_deleted')",
                            name="ck_product_analytics_erasure_reason"),
-        sa.CheckConstraint("status IN ('pending', 'done')",
+        sa.CheckConstraint("status IN ('pending', 'materialized', 'requested', 'verified', "
+                           "'not_required')",
                            name="ck_product_analytics_erasure_status"),
     )
+    op.create_index("ix_product_analytics_erasure_due", "product_analytics_erasure",
+                    ["status", "next_attempt_at"])
 
 
 _EXPECTED_UNIQUE = {
@@ -94,12 +103,13 @@ _EXPECTED_UNIQUE = {
 _EXPECTED_COLUMNS = {
     "product_analytics_consent": {"id", "user_id", "status", "generation", "subject", "grant_id",
                                   "notice_version", "granted_at", "expires_at", "withdrawn_at",
-                                  "updated_at"},
+                                  "updated_at", "vendor_exposed_at"},
     "product_analytics_outbox": {"id", "user_id", "generation", "subject", "event_id", "name",
                                  "authority", "occurred_at", "received_at", "properties",
                                  "attempts", "next_attempt_at"},
     "product_analytics_erasure": {"id", "subject", "reason", "status", "attempts",
-                                  "requested_at", "completed_at"},
+                                  "requested_at", "next_attempt_at", "vendor_person_ref",
+                                  "vendor_requested_at", "last_outcome", "completed_at"},
 }
 
 
@@ -130,6 +140,7 @@ def downgrade():
             connection.execute(sa.text(f"LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE"))
         if connection.execute(sa.text(f"SELECT 1 FROM {table} LIMIT 1")).scalar():
             raise RuntimeError(f"{table} downgrade would lose analytics consent or erasure state")
+    op.drop_index("ix_product_analytics_erasure_due", table_name="product_analytics_erasure")
     op.drop_index("ix_product_analytics_outbox_due", table_name="product_analytics_outbox")
     for table in reversed(_TABLES):
         op.drop_table(table)
