@@ -301,6 +301,12 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
                     feature="other"):
     """Like `_heavy_chat` but keeps finish/truncation metadata for generation."""
     _completion_tls.last = None
+    if feature == "coach_weekly_review":
+        call = _claude_chat if heavy_primary_route()[0] == "bedrock" else _openai_chat
+        return _completion_from_text(call(
+            messages, system_prompt=system_prompt, max_tokens=max_tokens,
+            temperature=temperature, feature=feature,
+        ))
     lg_key = ai_recovery.lastgood_key(
         "heavy_chat", ai_model_policy.heavy_model(), system_prompt or "", messages,
         max_tokens)

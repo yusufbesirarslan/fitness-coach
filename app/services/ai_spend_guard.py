@@ -290,6 +290,10 @@ def _bucket(now, window):
     return int(now // _WINDOW_SECONDS[window])
 
 
+# PD6 source pin waits for independent production spend approval.
+WEEKLY_REVIEW_DAILY_ATTEMPT_LIMIT = None
+
+
 def _planned_keys(cls, subject, now, feature=None):
     """[(key, limit, ttl_seconds, scope)] for every active ceiling of `cls`."""
     planned = []
@@ -316,6 +320,12 @@ def _planned_keys(cls, subject, now, feature=None):
             key = f"{_KEY_PREFIX}:user:{subject}:feature:{feature}:heavy:d:{_bucket(now, 'd')}"
             planned.append((key, max(1, daily // 3),
                             _WINDOW_SECONDS["d"] + _KEY_TTL_GRACE_SECONDS, "feature"))
+    if feature == "coach_weekly_review":
+        cap = WEEKLY_REVIEW_DAILY_ATTEMPT_LIMIT
+        if type(cap) is not int or cap <= 0 or subject is None:
+            return []
+        key = f"{_KEY_PREFIX}:global:feature:{feature}:d:{_bucket(now, 'd')}"
+        planned.append((key, cap, _WINDOW_SECONDS["d"] + _KEY_TTL_GRACE_SECONDS, "global"))
     # Global first: when both are exceeded the operator must see the global one.
     planned.sort(key=lambda item: item[3] != "global")
     return planned

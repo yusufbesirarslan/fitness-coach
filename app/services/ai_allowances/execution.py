@@ -408,6 +408,14 @@ def exempt_operation(name):
 
 def check_provider(owner, feature):
     """Run OUTSIDE D1's separate-connection user lock. No provider authority."""
+    if feature == "coach_weekly_review":
+        from app.services.weekly_review.operations import check_physical_binding
+        if not enabled():
+            _refuse("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
+        _check_owner(owner)
+        require_ready()
+        check_physical_binding(owner)
+        return
     if not enabled():
         if _ACTIVE.get() is not None:
             _refuse("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
@@ -452,6 +460,12 @@ def _exempt_feature(feature):
 
 def before_attempt(owner, feature, *, provider, payload):
     """Inside D1: row-only committed evidence, never an account lock."""
+    if feature == "coach_weekly_review":
+        from app.services.weekly_review.operations import mark_physical_attempt
+        if not enabled():
+            _refuse("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
+        mark_physical_attempt(owner)
+        return
     native = _NATIVE.get()
     # This scope is entered only for an originally metered operation. A flag
     # change cannot erase its durable dispatch obligation while it is running.
