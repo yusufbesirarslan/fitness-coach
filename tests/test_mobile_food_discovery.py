@@ -148,7 +148,7 @@ def test_raw_search_adapter_preserves_provider_identity(app, monkeypatch):
 
 def test_raw_serving_adapter_never_logs_provider_exception_detail(
         app, monkeypatch, caplog):
-    food_id = "sensitive-provider-food-id"
+    food_id = "987654321012345"
     provider_detail = "upstream echoed credential-shaped detail"
     monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "token")
 
@@ -176,7 +176,7 @@ def test_raw_serving_adapter_never_logs_token_failure_detail(
 
     with app.app_context():
         with pytest.raises(fatsecret.FoodProviderUnavailable):
-            mobile_food_discovery.servings("food-77")
+            mobile_food_discovery.servings("77077")
 
     assert provider_detail not in caplog.text
 
@@ -192,7 +192,7 @@ def test_raw_serving_adapter_never_logs_provider_error_payload(
 
     with app.app_context():
         with pytest.raises(fatsecret.FoodProviderUnavailable):
-            mobile_food_discovery.servings("food-77")
+            mobile_food_discovery.servings("77077")
 
     assert provider_detail not in caplog.text
 

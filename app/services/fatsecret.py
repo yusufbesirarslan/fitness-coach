@@ -4,7 +4,9 @@ import re
 import threading
 import time
 import requests as http_requests_lib
-from app.services import launch_food_search, nutrition_pipeline
+from collections.abc import Mapping
+from urllib.parse import parse_qsl, urlsplit
+from app.services import fatsecret_egress_policy, launch_food_search, nutrition_pipeline
 from concurrent.futures import ThreadPoolExecutor
 from flask import current_app
 from requests.adapters import HTTPAdapter
@@ -39,9 +41,45 @@ def _get_fs_session():
         return _fs_session
 
 
+def _screened_params(url, params):
+    """Every (name, value) a GET would send, or ProviderRequestWithheld."""
+    pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+    if params is None:
+        return pairs
+    if isinstance(params, Mapping):
+        items = params.items()
+    elif isinstance(params, (str, bytes)):
+        raise ProviderRequestWithheld  # an unscreenable raw query string
+    else:
+        try:
+            items = [tuple(pair) for pair in params]
+        except TypeError:
+            raise ProviderRequestWithheld from None
+        if any(len(pair) != 2 for pair in items):
+            raise ProviderRequestWithheld
+    return pairs + list(items)
+
+
+def _require_screened(url, params):
+    """Fail-closed transport backstop of the egress policy.
+
+    The canonical callers screen before any token or slot; this catches any
+    other present or future caller. It raises before the session is touched,
+    so no request, retry or fallback can follow. No value is ever logged.
+    """
+    for name, value in _screened_params(url, params):
+        if name == "food_id":
+            if fatsecret_egress_policy.canonical_food_id(value) is None:
+                raise ProviderRequestWithheld
+        elif name == "search_expression":
+            if fatsecret_egress_policy.withheld_search_rule(value) is not None:
+                raise ProviderRequestWithheld
+
+
 def _fs_get(url, **kwargs):
     """GET request to FatSecret API."""
     launch_food_search.require_available()
+    _require_screened(url, kwargs.get("params"))
     kwargs.setdefault("timeout", 10)
     return _get_fs_session().get(url, **kwargs)
 
@@ -185,6 +223,10 @@ class FoodProviderUnavailable(Exception):
     """Sanitized native discovery failure; never contains upstream detail."""
 
 
+class ProviderRequestWithheld(FoodProviderUnavailable):
+    """A FatSecret request refused by the egress policy at the transport."""
+
+
 def _native_payload(response):
     if not 200 <= response.status_code < 300:
         raise FoodProviderUnavailable from None
@@ -196,6 +238,13 @@ def _native_payload(response):
 
 def _food_get_raw(food_id, *, strict=False):
     """Fetch provider food data without applying legacy serving semantics."""
+    food_id = fatsecret_egress_policy.canonical_food_id(food_id)
+    if food_id is None:
+        # Same as provider error 106 (invalid ID), in strict and legacy mode:
+        # a miss, before any token, request, retry or method fallback.
+        current_app.logger.info(
+            "fatsecret event=food_id_withheld rule=non_canonical_food_id")
+        return None
     try:
         token = _get_fatsecret_token()
     except Exception as error:
@@ -389,6 +438,11 @@ def _food_find_by_barcode(code):
 
 def _food_search_raw(q, *, strict=False):
     """Fetch search matches without parsing provider description text."""
+    rule = fatsecret_egress_policy.withheld_search_rule(q)
+    if rule is not None:
+        # The existing empty answer of each mode, before any token or request.
+        current_app.logger.info("fatsecret event=food_query_withheld rule=%s", rule)
+        return [] if strict else None
     try:
         token = _get_fatsecret_token()
     except Exception:
