@@ -27,6 +27,16 @@ SUBJECT_MAX_AGE = "PRODUCT_ANALYTICS_SUBJECT_MAX_AGE_DAYS"
 
 #: Absolute ceiling for an undispatched outbox row, independent of config.
 OUTBOX_HARD_CEILING = timedelta(hours=48)
+#: Founder decision (2026-11-28): raw events at the vendor live at most 90
+#: days INCLUDING deletion lag. Capture is refused unless the configured
+#: rotation and overdue alarm fit inside it (``retention_bounded``).
+RAW_RETENTION_CEILING = timedelta(days=90)
+#: Client events may be backdated by up to one day (catalog envelope), so an
+#: event can be this much older than the subject it was sent under.
+CLIENT_BACKDATE = timedelta(days=1)
+#: Time reserved after the overdue alarm for a human to escalate a stuck
+#: vendor deletion before the ceiling is reached.
+ESCALATION_MARGIN = timedelta(days=7)
 DEFAULT_CONNECT_TIMEOUT = 3.0
 DEFAULT_READ_TIMEOUT = 10.0
 _TOKEN = re.compile(r"phc_[A-Za-z0-9]{20,80}")
@@ -110,3 +120,16 @@ def retention_policy(config):
         receipt_retention=timedelta(days=receipt) if receipt else None,
         erasure_overdue=timedelta(days=overdue) if overdue else None,
         subject_max_age=timedelta(days=rotation) if rotation else None)
+
+
+def retention_bounded(policy):
+    """True only if rotation and the overdue alarm are configured and
+
+    rotation + client backdate + overdue alarm + escalation margin <= ceiling.
+
+    This bounds what AxisAI controls; whether the vendor really deletes within
+    the overdue window is unverified until G5 (RETENTION.md)."""
+    if policy.subject_max_age is None or policy.erasure_overdue is None:
+        return False
+    return (policy.subject_max_age + CLIENT_BACKDATE + policy.erasure_overdue
+            + ESCALATION_MARGIN) <= RAW_RETENTION_CEILING

@@ -6,7 +6,10 @@ also runnable as ``flask product-analytics-run``. Never runs in a request.
 * Cleanup always runs (AxisAI-side retention only; no vendor call).
 * Dispatch runs only while ``FITX_PRODUCT_ANALYTICS_ENABLED`` is ON and a
   complete vendor configuration exists, including erasure credentials
-  (nothing is captured that could not be erased).
+  (nothing is captured that could not be erased), AND the retention
+  configuration fits the 90-day raw ceiling (``settings.retention_bounded``),
+  AND no erasure job is overdue. Otherwise capture halts (fail closed) while
+  erasure keeps running.
 * Vendor erasure runs whenever erasure configuration exists, also while the
   flag is OFF (a rollback must not strand deletions owed for data already sent).
 * Missing configuration: no vendor call at all (fail closed).
@@ -18,6 +21,7 @@ from collections import ChainMap
 from datetime import datetime
 
 from flask import current_app
+from sqlalchemy.exc import OperationalError
 
 from app.services import product_analytics
 from app.services.product_analytics import dispatch, posthog_transport, retention, settings
@@ -32,6 +36,26 @@ DISPATCH_BUDGET_SECONDS = 150.0
 
 def configured_transport(config):
     return posthog_transport.build(settings.vendor_settings(config))
+
+
+def _dispatch(transport, now, policy, clock):
+    totals = {"sent": 0, "fenced": 0, "retry": 0, "dropped": 0, "skipped": 0}
+    stop_at = clock() + DISPATCH_BUDGET_SECONDS
+    for _ in range(MAX_DISPATCH_BATCHES):
+        if clock() >= stop_at:
+            break
+        try:
+            step = dispatch.dispatch_once(transport, now=now, max_age=policy.outbox_max_age)
+        except OperationalError:
+            # Typically the database lock-hold cap ended a send that outlived
+            # it (B-3): the locks are already released, nothing was committed.
+            totals["aborted"] = totals.get("aborted", 0) + 1
+            break
+        for key in step:
+            totals[key] += step[key]
+        if step["sent"] + step["fenced"] + step["dropped"] == 0:
+            break
+    return totals
 
 
 def run_pass(*, transport=None, now=None, config=None, clock=time.monotonic):
@@ -49,21 +73,20 @@ def run_pass(*, transport=None, now=None, config=None, clock=time.monotonic):
                                                      overdue=policy.erasure_overdue)
             stats.update({f"erasure_{key}": value for key, value in erasure.items()})
         if product_analytics.enabled() and transport.can_capture and transport.can_erase:
-            totals = {"sent": 0, "fenced": 0, "retry": 0, "dropped": 0, "skipped": 0}
-            stop_at = clock() + DISPATCH_BUDGET_SECONDS
-            for _ in range(MAX_DISPATCH_BATCHES):
-                if clock() >= stop_at:
-                    break
-                step = dispatch.dispatch_once(transport, now=now, max_age=policy.outbox_max_age)
-                for key in totals:
-                    totals[key] += step[key]
-                if step["sent"] + step["fenced"] + step["dropped"] == 0:
-                    break
-            stats.update(totals)
+            if not settings.retention_bounded(policy):
+                stats["capture"] = "halted_retention_unbounded"
+            elif stats.get("erasure_overdue"):
+                stats["capture"] = "halted_erasure_overdue"
+            else:
+                stats["capture"] = "running"
+                stats.update(_dispatch(transport, now, policy, clock))
     current_app.logger.info(
         "product_analytics event=pass %s",
         " ".join(f"{key}={stats[key]}" for key in sorted(stats)))
     if stats.get("erasure_overdue"):
         current_app.logger.error("product_analytics event=erasure_overdue count=%d",
                                  stats["erasure_overdue"])
+    if stats.get("aborted"):
+        current_app.logger.error("product_analytics event=dispatch_aborted count=%d",
+                                 stats["aborted"])
     return stats

@@ -31,6 +31,8 @@ TOKEN = "phc_" + "F" * 40          # fake, format-valid only
 PERSONAL = "phx_" + "S" * 48       # fake, format-valid only
 FULL = {settings.REGION: "eu", settings.PROJECT_TOKEN: TOKEN, settings.PROJECT_ID: "4242",
         settings.PERSONAL_API_KEY: PERSONAL}
+#: Synthetic retention values that fit the 90-day ceiling (60 + 1 + 14 + 7 = 82).
+BOUNDED = {settings.SUBJECT_MAX_AGE: "60", settings.ERASURE_OVERDUE: "14"}
 
 
 class FakeVendor(HTTPAdapter):
@@ -293,9 +295,9 @@ def test_pass_logs_counts_only(on, make_user, caplog):
     subject, grant_id = row.subject, row.grant_id
     transport, vendor = _transport(lambda request: (503, b"echo " + TOKEN.encode()))
     with caplog.at_level(logging.DEBUG):
-        stats = pipeline.run_pass(transport=transport, config=FULL)
+        stats = pipeline.run_pass(transport=transport, config={**FULL, **BOUNDED})
         consent.withdraw(user.id)
-        pipeline.run_pass(transport=transport, config=FULL)
+        pipeline.run_pass(transport=transport, config={**FULL, **BOUNDED})
     assert stats["retry"] == 1 and vendor.calls
     text = caplog.text + json.dumps(stats)
     for secret in (TOKEN, PERSONAL, subject, grant_id, "4242", user.username):
@@ -510,8 +512,72 @@ def test_dispatch_loop_respects_its_wall_clock_budget(on, make_user, monkeypatch
                         lambda *a, **k: calls.append(1) or {"sent": 1, "fenced": 0, "retry": 0,
                                                             "dropped": 0, "skipped": 0})
     ticks = iter([0.0] + [0.0, 0.0, pipeline.DISPATCH_BUDGET_SECONDS + 1] + [999.0] * 30)
-    pipeline.run_pass(transport=SyntheticTransport(), config={}, clock=lambda: next(ticks))
+    pipeline.run_pass(transport=SyntheticTransport(), config=BOUNDED, clock=lambda: next(ticks))
     assert len(calls) == 2
+
+
+# ── Retention ceiling and fail-closed capture (founder: raw <= 90 d incl. lag) ──
+
+
+@pytest.mark.parametrize("config, bounded", [
+    ({}, False),
+    ({settings.SUBJECT_MAX_AGE: "60"}, False),                 # no overdue alarm
+    ({settings.ERASURE_OVERDUE: "14"}, False),                 # no rotation
+    ({settings.SUBJECT_MAX_AGE: "60", settings.ERASURE_OVERDUE: "14"}, True),
+    ({settings.SUBJECT_MAX_AGE: "68", settings.ERASURE_OVERDUE: "14"}, True),   # = 90 d
+    ({settings.SUBJECT_MAX_AGE: "69", settings.ERASURE_OVERDUE: "14"}, False),  # 91 d
+    ({settings.SUBJECT_MAX_AGE: "90", settings.ERASURE_OVERDUE: "1"}, False),
+    ({settings.SUBJECT_MAX_AGE: "500", settings.ERASURE_OVERDUE: "14"}, False),  # out of bounds
+])
+def test_capture_halts_unless_retention_fits_the_ceiling(on, make_user, config, bounded):
+    assert settings.retention_bounded(settings.retention_policy(config)) is bounded
+    user = make_user(f"analytics-ceiling-{len(config)}-{bounded}")
+    _granted(user.id)
+    transport = SyntheticTransport()
+    stats = pipeline.run_pass(transport=transport, config=config)
+    if bounded:
+        assert stats["capture"] == "running" and stats["sent"] == 1
+    else:
+        assert stats["capture"] == "halted_retention_unbounded" and "sent" not in stats
+        assert transport.sent == [] and ProductAnalyticsOutbox.query.count() == 1
+
+
+def test_an_overdue_erasure_halts_capture_but_erasure_keeps_running(on, make_user, caplog):
+    owed = make_user("analytics-owed")
+    _granted(owed.id, exposed=True)
+    consent.withdraw(owed.id)
+    job = ProductAnalyticsErasure.query.one()
+    job.requested_at = datetime.utcnow() - timedelta(days=15)
+    db.session.commit()
+    live = make_user("analytics-live")
+    _granted(live.id)
+    transport = SyntheticTransport()
+    with caplog.at_level(logging.ERROR):
+        stats = pipeline.run_pass(transport=transport, config=BOUNDED)
+    assert stats["capture"] == "halted_erasure_overdue" and stats["erasure_overdue"] == 1
+    assert stats["erasure_materialized"] == 1                       # erasure still advances
+    assert all(item["event"] == "$set" for body in transport.sent
+               for item in json.loads(body)["batch"])               # no product event left
+    assert ProductAnalyticsOutbox.query.filter_by(user_id=live.id).count() == 1
+    assert "event=erasure_overdue" in caplog.text
+
+
+def test_a_database_abort_mid_dispatch_stops_the_pass_with_a_fixed_code(on, make_user,
+                                                                        monkeypatch, caplog):
+    from sqlalchemy.exc import OperationalError
+    user = make_user("analytics-abort")
+    _granted(user.id)
+    calls = []
+
+    def abort(*args, **kwargs):
+        calls.append(1)
+        raise OperationalError("SELECT 1", {}, Exception("synthetic"))
+
+    monkeypatch.setattr(dispatch, "dispatch_once", abort)
+    with caplog.at_level(logging.ERROR):
+        stats = pipeline.run_pass(transport=SyntheticTransport(), config=BOUNDED)
+    assert calls == [1] and stats["aborted"] == 1 and stats["sent"] == 0
+    assert "event=dispatch_aborted count=1" in caplog.text and "synthetic" not in caplog.text
 
 
 def test_a_subject_whose_rows_are_all_fenced_is_never_marked_exposed(on, make_user):

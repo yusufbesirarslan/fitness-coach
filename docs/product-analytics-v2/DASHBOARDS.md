@@ -11,6 +11,14 @@ Conventions:
 * Every panel is **survivor-biased**: withdrawal and rotation delete history.
 * No opt-in rate is computable from vendor data.
 
+Truthful limits (founder-confirmed 2026-11-28; the catalog is frozen at 20 events):
+
+* **Proposal acceptance** is measurable (P5b).
+* **Direct-apply training success rate is N/A**: there is no attempt record, so only counts are shown.
+* **Signup funnel is N/A**: nothing is collected before an account exists.
+* **Cohort coverage depends on the approved processing model** (table at the end). Under the current model C, only consenters appear.
+* Pseudonym rotation (proposed 60 d, RETENTION.md) ends a subject's history. A cohort window longer than the rotation interval is not measurable; D30 stays measurable.
+
 ## P1 Onboarding completion
 
 * **Numerator:** subjects with axis_v2_onboarding_completed within 24 h after their first axis_v2_onboarding_started
@@ -78,7 +86,7 @@ Conventions:
 * **Cohort / period:** ISO week of the event (period ratio)
 * **Maturity:** week closed + 1 d
 * **Known limitations:**
-  * DELTA-1 events are pending catalog review.
+  * DELTA-1 is product-approved (2026-11-28); its lawful basis is pending counsel, like every event.
   * Direct (no-confirmation) training applies have NO attempt denominator: a direct-apply success RATE is not measurable; only counts.
   * Cancelled vs stale proposals are not distinguished (proposed - confirmed - still pending).
   * Nutrition: Tier 2 (consent only).

@@ -43,7 +43,7 @@ features. Refusing changes nothing else in the app.
 where applicable]). You can withdraw it at any time with the same switch.
 
 **Pseudonym.** Events are linked to a random identifier created when you
-switch analytics on (and replaced [every N days] and whenever you switch it
+switch analytics on (and replaced [every 60 days] and whenever you switch it
 off and on again). Our analytics provider never receives the link to your
 account. We keep that link only to honour withdrawal and deletion, so the data
 is pseudonymous, not anonymous.
@@ -57,8 +57,10 @@ reach the provider only from our servers.
 **Retention.**
 
 * Undelivered events: at most [48 hours] on our servers.
-* Event data at the provider: at most [90 days] (enforced by replacing the
-  pseudonym and deleting the old one).
+* Event data at the provider: at most [90 days], including the time the
+  provider needs to complete deletion (enforced by replacing the pseudonym
+  [every 60 days] and having the old one deleted; [only once verified with the
+  provider, gate G5]).
 * Aggregated statistics that cannot identify anyone: up to [12 months].
 
 **Withdrawal and deletion.** When you switch analytics off, the app stops at
@@ -129,7 +131,7 @@ Kullanım Koşulları'nın kabulünden, sağlık verisi rızasından ve yapay ze
 6/1-a]). Rızanızı aynı seçenekle dilediğiniz zaman geri alabilirsiniz.
 
 **Takma kimlik.** Olaylar, analitiği açtığınızda oluşturulan rastgele bir
-kimlikle ilişkilendirilir. Bu kimlik [her N günde bir] ve analitiği kapatıp
+kimlikle ilişkilendirilir. Bu kimlik [her 60 günde bir] ve analitiği kapatıp
 yeniden açtığınızda yenilenir. Analitik hizmet sağlayıcımız bu kimliğin
 hesabınızla bağlantısını hiçbir zaman almaz. Bu bağlantıyı yalnızca rızanın
 geri alınması ve silme taleplerini yerine getirmek için saklarız. Bu nedenle
@@ -144,8 +146,10 @@ Olaylar hizmet sağlayıcıya yalnızca sunucularımızdan iletilir.
 **Saklama süresi.**
 
 * İletilmemiş olaylar: sunucularımızda en fazla [48 saat].
-* Hizmet sağlayıcıdaki olay verileri: en fazla [90 gün] (takma kimlik
-  yenilenerek ve eskisi sildirilerek uygulanır).
+* Hizmet sağlayıcıdaki olay verileri: silme işleminin tamamlanması için
+  gereken süre dahil en fazla [90 gün] (takma kimlik [her 60 günde bir]
+  yenilenerek ve eskisi sildirilerek uygulanır; [yalnızca hizmet sağlayıcıyla
+  doğrulandıktan sonra, G5]).
 * Kimseyi tanımlamaya imkân vermeyen toplu istatistikler: en fazla [12 ay].
 
 **Rızanın geri alınması ve silme.** Analitiği kapattığınızda uygulama

@@ -32,7 +32,7 @@ found, bulk delete accepted -> ``requested`` -> vendor reports verified ->
 import time
 from datetime import datetime, timedelta
 
-from sqlalchemy import update
+from sqlalchemy import text, update
 
 from app.extensions import db
 from app.models import ProductAnalyticsConsent, ProductAnalyticsErasure, ProductAnalyticsOutbox
@@ -95,6 +95,23 @@ def _mark_exposure(owners, now):
     db.session.commit()
 
 
+#: Hard wall-clock bound on how long one dispatch transaction may sit idle
+#: holding consent/outbox locks around a send (review B-3). ``requests``
+#: timeouts bound each socket operation, not DNS resolution, attempts over
+#: several resolved addresses or a slow-drip peer. PostgreSQL ends the session
+#: once it has been idle in this transaction for longer than the cap, which
+#: releases the locks at that instant (a waiting withdrawal or purge proceeds)
+#: and rolls back; the pass then stops dispatching (``pipeline``).
+LOCK_HOLD_CAP = timedelta(seconds=30)
+
+
+def _cap_lock_hold():
+    if db.session.get_bind().dialect.name == "postgresql":
+        db.session.execute(
+            text("SELECT set_config('idle_in_transaction_session_timeout', :ms, true)"),
+            {"ms": str(int(LOCK_HOLD_CAP.total_seconds() * 1000))})
+
+
 def dispatch_once(transport, *, limit=50, now=None, max_age=MAX_AGE):
     now = now or datetime.utcnow()
     max_age = min(max_age, MAX_AGE)
@@ -106,6 +123,7 @@ def dispatch_once(transport, *, limit=50, now=None, max_age=MAX_AGE):
             return stats
         _mark_exposure(owners, now)
         # Transaction B: consent first, then outbox (same order as withdrawal/purge).
+        _cap_lock_hold()
         grants = {row.user_id: row for row in (
             ProductAnalyticsConsent.query.filter(ProductAnalyticsConsent.user_id.in_(owners))
             .order_by(ProductAnalyticsConsent.user_id).populate_existing()

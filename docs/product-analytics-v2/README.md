@@ -66,7 +66,7 @@ it first. Decisions are serialized. Queue in memory only (≤100, batches of 20,
 epoch + generation. Server-owned success events are not mappable. No vendor
 SDK; the device never stores an event.
 
-## 3. Exact event inventory (catalog `catalog.json`, `review_status: PROPOSED_PENDING_CATALOG_REVIEW`)
+## 3. Exact event inventory (catalog `catalog.json`, `review_status: PRODUCT_SCOPE_APPROVED_LEGAL_BASIS_PENDING`)
 
 No event has a free-text, numeric, health, content or identifier property.
 Every property value is a closed string enum.
@@ -100,9 +100,11 @@ food log / Nutrition contents; Coach Nutrition WRITE (enum value added only
 when that writer exists and is reviewed); person properties, `identify`,
 `alias`, groups; any device/app/OS/locale/timezone/network/screen metadata.
 
-DELTA-1 (2026-11-28, `catalog.delta_pending_review`, pending catalog review)
-adds Coach Nutrition success and the canonical proposal denominator. It is a
-separate commit so it can be dropped. Chat messages are never attempts.
+DELTA-1 (2026-11-28) adds Coach Nutrition success and the canonical proposal
+denominator. **Founder approved it as product scope on 2026-11-28**
+(`catalog.product_scope_approval`; the catalog is frozen at 20 events). Product
+approval is **not** a lawful basis: `catalog.legal_basis_status` stays
+pending per event (COUNSEL_DECISION_PACKET.md). Chat messages are never attempts.
 Refusal reasons, proposal contents and plan or nutrition contents are never
 emitted.
 
@@ -151,11 +153,14 @@ D-4 adds an onboarding-time prompt.
 
 2026-11-28 additions:
 
-* `test_product_analytics_v2_transport.py` (43): settings fail-closed, exact
+* `test_product_analytics_v2_transport.py` (51): settings fail-closed, exact
   URLs, timeouts, redirects/HTTP refused, response caps, private-API key use,
   loopback timeout, pipeline flag/erasure independence, no secrets in logs,
-  retention, rotation, erasure lifecycle, budget, worker tick.
-* `test_product_analytics_v2_pg.py` (18, real PostgreSQL): withdrawal vs
+  retention, rotation, erasure lifecycle, budget, worker tick, the 90-day
+  retention ceiling gate (8 configs), the overdue-erasure capture halt, and
+  the fixed-code dispatch abort.
+* `test_product_analytics_v2_pg.py` (19, real PostgreSQL): the B-3 lock-hold
+  cap releasing a withdrawal behind a hung send (mutation-checked), withdrawal vs
   in-flight send, withdrawal before admission, duplicate wakeups and ordering,
   generation/subject fence, withdraw+regrant in flight, account deletion race,
   atomic durable erasure job, lost-ack replay, expiry cleanup, erasure retry
@@ -165,7 +170,8 @@ D-4 adds an onboarding-time prompt.
 * `test_product_analytics_v2_coach_delta.py` (8): DELTA-1.
 * `test_product_analytics_v2_dashboards.py` (2).
 
-Backend `tests/test_product_analytics_v2.py` (40 cases): OFF inertness (404 before
+Backend `tests/test_product_analytics_v2.py` (41 cases, incl. the frozen
+20-event catalog with product approval and legal basis pending): OFF inertness (404 before
 auth, zero SQL), consent independence/notice/idempotence/regrant rotation,
 withdrawal purge + erasure job, ingress strictness (12 out-of-catalog cases),
 envelope bounds, account fence (other account, stale grant, regrant), expiry,
@@ -173,10 +179,12 @@ canonical identity dedup, real writer (`commit_general_plan`), exact emitter
 inventory (AST), no network imports, exact wire allowlist without account
 identity, withdrawal-before-dispatch, #541 A6 regression, bounded retries,
 erasure on withdrawal and account purge. Mutation-checked: dispatch fence,
-account fence, flag gate. Mobile `test/core/analytics/first_party_analytics_test.dart` (27,
+account fence, flag gate. Mobile `test/core/analytics/first_party_analytics_test.dart` (30,
 incl. durable withdrawal and stop counters), mutation-checked in-flight fence.
 
 ## 6. Remaining activation gates
 
-See `PRIVACY_REVIEW_PACKET.md` §8. Nothing in this source authorizes
+See `PRIVACY_REVIEW_PACKET.md` §8, the exact G2/G3/G5 checklist in
+`ACTIVATION_HANDOFF.md` and the counsel sheet in
+`COUNSEL_DECISION_PACKET.md`. Nothing in this source authorizes
 collection, vendor provisioning, migration, merge, deploy, ASC or TestFlight.

@@ -135,6 +135,33 @@ def test_withdrawal_waits_for_the_in_flight_send_then_fences_everything(pg_app):
         assert (job.reason, job.status) == ("withdrawn", "pending")   # exposed before send
 
 
+def test_the_lock_hold_cap_releases_a_withdrawal_behind_a_hung_send(pg_app, monkeypatch):
+    """B-3: whatever the send is stuck in (DNS, several addresses, a slow-drip
+    peer), PostgreSQL ends the idle dispatch transaction at the cap, so the
+    withdrawal waits at most the cap, never the send."""
+    monkeypatch.setattr(dispatch, "LOCK_HOLD_CAP", timedelta(seconds=1))
+    with pg_app.app_context():
+        grant(1)
+    gate = Gate()
+    sender = background(pg_app, dispatch.dispatch_once, gate)
+    assert gate.entered.wait(WAIT)
+    started = time.monotonic()
+    withdrawal = background(pg_app, consent.withdraw, 1)
+    assert withdrawal["done"].wait(WAIT)            # while the send is still parked
+    waited = time.monotonic() - started
+    assert not sender["done"].is_set() and waited < 1 + 3
+    join(withdrawal)
+    gate.release.set()
+    with pytest.raises(sa.exc.OperationalError):
+        join(sender)                                # nothing of the pass commits
+    with pg_app.app_context():
+        assert ProductAnalyticsOutbox.query.count() == 0
+        job = ProductAnalyticsErasure.query.one()
+        assert (job.reason, job.status) == ("withdrawn", "pending")   # exposure was committed
+        grant(2)                                    # the pool recovers for the next pass
+        assert dispatch.dispatch_once(SyntheticTransport())["sent"] == 1
+
+
 def test_withdrawal_committed_before_transport_admission_sends_nothing(pg_app, monkeypatch):
     with pg_app.app_context():
         grant(1)

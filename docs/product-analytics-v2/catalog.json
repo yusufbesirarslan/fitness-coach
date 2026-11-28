@@ -2,7 +2,7 @@
   "schema_version": 2,
   "purpose": "product_analytics",
   "notice_version": "analytics-notice-v1-draft",
-  "review_status": "PROPOSED_PENDING_CATALOG_REVIEW",
+  "review_status": "PRODUCT_SCOPE_APPROVED_LEGAL_BASIS_PENDING",
   "vendor_wire_allowlist": {
     "batch": ["api_key", "batch"],
     "event": ["event", "distinct_id", "uuid", "timestamp", "properties"],
@@ -20,9 +20,13 @@
     "max_body_bytes": 16384,
     "occurred_at_window_seconds": {"past": 86400, "future": 300}
   },
-  "delta_pending_review": {
-    "DELTA-1 (2026-11-28)": ["axis_v2_coach_mutation_applied.domain=nutrition", "axis_v2_coach_change_proposed", "axis_v2_coach_change_confirmed"]
+  "product_scope_approval": {
+    "decision": "DELTA_1_EVENT_CATALOG=APPROVED_PRODUCT_SCOPE",
+    "by": "founder", "date": "2026-11-28",
+    "scope": "exactly the 20 events in this file, including DELTA-1; no further events without a new catalog review",
+    "DELTA-1": ["axis_v2_coach_mutation_applied.domain=nutrition", "axis_v2_coach_change_proposed", "axis_v2_coach_change_confirmed"]
   },
+  "legal_basis_status": "PENDING_COUNSEL_PER_EVENT: product approval is NOT a lawful processing basis for any event. Until written counsel disposition, every event requires the independent default-denied analytics grant (model C). See LEGAL_BASIS_ASSESSMENT.md and COUNSEL_DECISION_PACKET.md.",
   "events": {
     "axis_v2_analytics_enabled": {
       "authority": "server", "properties": {},
@@ -56,17 +60,17 @@
     },
     "axis_v2_coach_mutation_applied": {
       "authority": "server", "properties": {"domain": ["training", "nutrition"]},
-      "trigger": "training: plan_mutation.apply_plan_mutation committed outcome=applied with actor=ai_coach (direct or after confirmation). nutrition: nutrition_plan_mutation.resolve_edit committed a confirmed Coach Nutrition Plan edit (applied). no_op, replayed, refused, cancelled, stale and undo are not counted. DELTA-1: the nutrition value is pending catalog review.",
+      "trigger": "training: plan_mutation.apply_plan_mutation committed outcome=applied with actor=ai_coach (direct or after confirmation). nutrition: nutrition_plan_mutation.resolve_edit committed a confirmed Coach Nutrition Plan edit (applied). no_op, replayed, refused, cancelled, stale and undo are not counted. DELTA-1 (product-approved 2026-11-28).",
       "kpis": ["coach_authorized_mutation_success"]
     },
     "axis_v2_coach_change_proposed": {
       "authority": "server", "properties": {"domain": ["training", "nutrition"]},
-      "trigger": "A NEW pending Coach change proposal (the user must confirm) was committed. training: plan_confirmation.create_or_reuse_pending inserted a non-undo proposal (reuse of the identical pending proposal is not a new one). nutrition: nutrition_plan_mutation published a prepared edit proposal. Chat messages, tool calls, refusals and direct applies are not proposals. DELTA-1, pending catalog review.",
+      "trigger": "A NEW pending Coach change proposal (the user must confirm) was committed. training: plan_confirmation.create_or_reuse_pending inserted a non-undo proposal (reuse of the identical pending proposal is not a new one). nutrition: nutrition_plan_mutation published a prepared edit proposal. Chat messages, tool calls, refusals and direct applies are not proposals. DELTA-1, product-approved 2026-11-28.",
       "kpis": ["coach_proposal_acceptance_denominator"]
     },
     "axis_v2_coach_change_confirmed": {
       "authority": "server", "properties": {"domain": ["training"]},
-      "trigger": "plan_confirmation.mark_applied performed the pending->applied transition of a non-undo training proposal after its mutation committed. Nutrition confirmations are axis_v2_coach_mutation_applied{domain=nutrition} (every Nutrition edit is confirmed), so no nutrition value exists here. DELTA-1, pending catalog review.",
+      "trigger": "plan_confirmation.mark_applied performed the pending->applied transition of a non-undo training proposal after its mutation committed. Nutrition confirmations are axis_v2_coach_mutation_applied{domain=nutrition} (every Nutrition edit is confirmed), so no nutrition value exists here. DELTA-1, product-approved 2026-11-28.",
       "kpis": ["coach_proposal_acceptance_numerator"]
     },
     "axis_v2_weekly_checkin_submitted": {

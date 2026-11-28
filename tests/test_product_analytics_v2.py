@@ -484,3 +484,17 @@ def test_wire_timestamp_is_utc_milliseconds():
                           event_id=str(uuid.uuid4()), properties="{}",
                           occurred_at=datetime(2026, 11, 27, 18, 44, 26, 222776))
     assert wire.wire_event(row)["timestamp"] == "2026-11-27T18:44:26.222Z"
+
+
+def test_catalog_records_product_approval_only_and_is_frozen_at_twenty_events():
+    """Founder approved DELTA-1 and the 20-event product scope (2026-11-28).
+    Product approval is not a lawful basis: legal status stays pending."""
+    from app.services.product_analytics import catalog
+    approval = catalog.CATALOG["product_scope_approval"]
+    assert approval["decision"] == "DELTA_1_EVENT_CATALOG=APPROVED_PRODUCT_SCOPE"
+    assert catalog.CATALOG["review_status"] == "PRODUCT_SCOPE_APPROVED_LEGAL_BASIS_PENDING"
+    assert catalog.CATALOG["legal_basis_status"].startswith("PENDING_COUNSEL_PER_EVENT")
+    assert "delta_pending_review" not in catalog.CATALOG
+    assert len(catalog.EVENTS) == 20
+    assert catalog.EVENTS["axis_v2_coach_mutation_applied"]["properties"]["domain"] == [
+        "training", "nutrition"]

@@ -174,6 +174,11 @@ inline card on an existing surface after first value.
 
 ## 5. Questions for counsel (DECIDE)
 
+**Consolidated, decision-ready form:** [`COUNSEL_DECISION_PACKET.md`](COUNSEL_DECISION_PACKET.md)
+(2026-11-28). It holds the founder positions, the exact event disposition
+under L, the requirements by model and the minimal implementation delta. Q-8
+there reflects the founder bound "≤ 90 days including deletion lag".
+
 * **Q-1 (Apple).** Does App Review Guideline 5.1.1(ii) (consent for user or
   usage data "even if … anonymous"; re-verify the text) and 5.1.2 (no
   repurposing "without further consent unless otherwise explicitly permitted

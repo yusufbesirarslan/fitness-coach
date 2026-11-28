@@ -6,7 +6,9 @@
     "unit": "distinct_id (per-grant pseudonym, personless)",
     "time": "stored UTC; weeks and days in Europe/Istanbul; ISO weeks start Monday",
     "watermark": "24 h ingestion",
-    "survivor_bias": "withdrawal and rotation delete history; every panel is biased toward people who kept consent"
+    "survivor_bias": "withdrawal and rotation delete history; every panel is biased toward people who kept consent",
+    "truthful_limits": "Proposal acceptance is measurable (P5b). Direct-apply training success RATE is N/A (no attempt record; counts only). Signup funnel is N/A (nothing before an account exists). Cohort coverage depends on the approved processing model (see DASHBOARDS.md coverage table); under the current model C only consenters appear.",
+    "rotation": "Pseudonym rotation (proposed 60 d, RETENTION.md) ends a subject's history; cohort windows longer than the rotation interval are not measurable."
   },
   "panels": [
     {
@@ -149,7 +151,7 @@
       "cohort": "ISO week of the event (period ratio)",
       "maturity": "week closed + 1 d",
       "limitations": [
-        "DELTA-1 events are pending catalog review.",
+        "DELTA-1 is product-approved (2026-11-28); its lawful basis is pending counsel, like every event.",
         "Direct (no-confirmation) training applies have NO attempt denominator: a direct-apply success RATE is not measurable; only counts.",
         "Cancelled vs stale proposals are not distinguished (proposed - confirmed - still pending).",
         "Nutrition: Tier 2 (consent only)."
