@@ -507,6 +507,8 @@ def commit_plan(operation_id, user_id, *, expected_candidate_sha=None):
             score=operation.candidate_score,
         )
         db.session.flush()
+        from app.services import workout_retention
+        workout_retention.stage_schedule(user_id, plan, starts_plan=True)
         operation.status = TRAINING_PLAN_GENERATION_SUCCEEDED
         operation.training_plan_id = plan.id
         operation.plan_lineage_id = plan.lineage_id
@@ -669,6 +671,8 @@ def commit_general_plan(user_id, key, fingerprint, document_json):
             raise GenerationInProgress()
         plan = _insert_plan(user_id=user_id, plan_data=document_json, score=None)
         db.session.flush()
+        from app.services import workout_retention
+        workout_retention.stage_schedule(user_id, plan, starts_plan=True)
         operation.training_plan_id = plan.id
         operation.plan_lineage_id = plan.lineage_id
         operation.completed_at = now

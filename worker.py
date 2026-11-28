@@ -127,23 +127,20 @@ def _weekly_review_tick(last_review, now):
     if now - last_review < WEEKLY_REVIEW_INTERVAL_SECONDS:
         return last_review
     try:
-        from app.feature_flags import parse_bool_flag
-        key = "FITX_WEEKLY_CHECKIN_AI_REVIEW_ENABLED"
-        if parse_bool_flag(key, os.environ.get(key), default=False):
-            from app.jobs import get_queue
-            from app.jobs.tasks import process_weekly_checkin_reviews
-            from rq.exceptions import DuplicateJobError
-            queue = get_queue()
-            if queue is not None:
-                try:
-                    queue.enqueue_call(
-                        process_weekly_checkin_reviews, timeout=240,
-                        job_id="axisai-weekly-review-scan-v1", unique=True,
-                        ttl=60, result_ttl=0, failure_ttl=0,
-                        description="axisai.weekly-review.scan.v1",
-                    )
-                except DuplicateJobError:
-                    pass
+        from app.jobs import get_queue
+        from app.jobs.tasks import process_weekly_checkin_reviews
+        from rq.exceptions import DuplicateJobError
+        queue = get_queue()
+        if queue is not None:
+            try:
+                queue.enqueue_call(
+                    process_weekly_checkin_reviews, timeout=240,
+                    job_id="axisai-weekly-review-scan-v1", unique=True,
+                    ttl=60, result_ttl=0, failure_ttl=0,
+                    description="axisai.weekly-review.scan.v1",
+                )
+            except DuplicateJobError:
+                pass
     except Exception as error:
         _log.warning("weekly_review event=wakeup_failed type=%s", type(error).__name__)
     return now

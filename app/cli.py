@@ -113,7 +113,8 @@ def _user_child_models():
         UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
         UserWearableConnection, WaterLog,
         WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
-        WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutCompletionDay, WorkoutLog,
+        WeeklyCheckIn, WeeklyLog, WeeklyReviewAdmission, WeeklyWinner,
+        WorkoutCompletionDay, WorkoutScheduleCoverage, WorkoutLog,
         WorkoutSession, TrainingSessionOutcome, TrainingStartDecision,
     )
     return (
@@ -122,12 +123,12 @@ def _user_child_models():
         # Product analytics v2: the purge enqueues vendor erasure for the live
         # pseudonym (no user FK) BEFORE these mapping rows are deleted.
         ProductAnalyticsOutbox, ProductAnalyticsConsent,
-        AppleSubscription, AppleAccountAssociation, ExerciseNote, UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn,
+        AppleSubscription, AppleAccountAssociation, ExerciseNote, UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, WeeklyReviewAdmission,
         NutritionPlanEditOperation, NutritionPlanMutationRecord, NutritionPlan,
         # PlanMutationRecord before TrainingPlan: the journal describes plan
         # history, so nothing should ever observe entries for a plan that is
         # already gone.
-        PlanMutationRecord, TrainingPlanConfirmationProposal,
+        PlanMutationRecord, TrainingPlanConfirmationProposal, WorkoutScheduleCoverage,
         TrainingPlanReplacementReceipt, TrainingPlanReplacementProposal,
         # BE-03B-01B: the allowance binding points at its generation operation.
         TrainingPlanReplacementGenerationOperation, TrainingPlanGenerationAllowance,

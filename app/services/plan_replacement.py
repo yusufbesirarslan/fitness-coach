@@ -278,6 +278,8 @@ def replace_training_plan_in_transaction(user_id, expectation, *, plan_data,
     # the caller can hand it back without a second read (and without a second
     # race).
     db.session.flush()
+    from app.services import workout_retention
+    workout_retention.stage_schedule(user_id, replacement, starts_plan=current is None)
     result = ReplacementResult(
         lineage_id=replacement.lineage_id,
         mutation_version=replacement.mutation_version,

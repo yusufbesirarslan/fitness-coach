@@ -49,9 +49,10 @@ def test_alembic_migrations_have_single_head():
     # LAUNCH-FREE-BE-01 widens the bucket scope CHECK on the physical budget.
     # FATSECRET-RETENTION-PHASE1 adds provider provenance on top of F01.
     # G4 (#530) records independent cardio-session outcomes after C1.
-    # Product analytics v2 consent/outbox/erasure tables follow PD6.
-    assert heads == ["6e25ecb68c09"]
-    assert parents[heads[0]] == "e6a4b91d702c"
+    # Product analytics v2 consent/outbox/erasure tables follow PD6; retention + PD6 allowance follow analytics.
+    assert heads == ["f14209ba73c6"]
+    assert parents[heads[0]] == "6e25ecb68c09"
+    assert parents["6e25ecb68c09"] == "e6a4b91d702c"
     assert parents["e6a4b91d702c"] == "c8e1f3a5b702"
     assert parents["c8e1f3a5b702"] == "b7d2e9f4a1c3"
     assert parents["b7d2e9f4a1c3"] == "a7d3c9e1f2b4"
@@ -103,7 +104,8 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # PD2 adds the training-start decision table, no exercise schema.
     # PD5 and PD6 expand weekly check-ins.
     # Product analytics v2 adds consent/outbox/erasure tables, no exercise schema.
-    assert len(revision_files) == 74
+    # Retention + PD6 allowance adds completion-day/schedule-coverage/admission tables, no exercise schema.
+    assert len(revision_files) == 75
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py",
         "e5b27aa4101c_owner_private_exercises.py",

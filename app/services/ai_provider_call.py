@@ -329,7 +329,7 @@ class Admission:
         """Blocking call with charged, bounded transient retries."""
         transport = self._take(transport)
         from app.services.ai_allowances import execution as allowance_execution
-        attempts = _max_attempts(self.family)
+        attempts = 1 if self.feature == "coach_weekly_review" else _max_attempts(self.family)
         for attempt in range(1, attempts + 1):
             allowance_execution.check_provider(self.subject, self.feature)
             if attempt > 1 and self._charge:

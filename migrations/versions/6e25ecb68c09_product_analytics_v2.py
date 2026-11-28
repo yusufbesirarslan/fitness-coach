@@ -6,9 +6,9 @@ Revises: e6a4b91d702c
 Expand only: three new, empty tables (erasure rows carry the full vendor
 receipt lifecycle; consent carries the vendor-exposure marker). Nothing existing changes and no code
 path writes them while FITX_PRODUCT_ANALYTICS_ENABLED is OFF (default).
-INTEGRATION NOTE: this lane was cut from #568 (head e6a4b91d702c); the
-integration owner re-points ``down_revision`` once, at composition, so the
-final graph keeps a single head. Downgrade refuses to drop any row.
+INTEGRATION NOTE: this lane was cut from #568 (head e6a4b91d702c). The final
+isolated composition keeps this parent and re-points retention f14209ba73c6
+onto this revision instead, so the graph keeps a single head. Downgrade refuses to drop any row.
 """
 
 import sqlalchemy as sa

@@ -212,6 +212,8 @@ def _erase_rows(user, held):
         counts["profile"] = changed
 
     if "checkins" not in held:
+        from app.services.weekly_review.allowance import restore_erased_checkins
+        restore_erased_checkins(uid)
         counts["checkins"] = (_delete(m.WeeklyCheckIn, m.WeeklyCheckIn.user_id == uid)
                               + _delete(m.WeeklyLog, m.WeeklyLog.user_id == uid))
 
@@ -224,7 +226,7 @@ def _erase_rows(user, held):
             m.PlanMutationRecord, m.TrainingPlanConfirmationProposal,
             m.NutritionPlanEditOperation, m.NutritionPlanMutationRecord,
             m.TrainingPlanReplacementReceipt, m.TrainingPlanReplacementProposal,
-            m.TrainingPlan, m.NutritionPlan))
+            m.TrainingPlan, m.NutritionPlan, m.WorkoutScheduleCoverage))
         # Generation ledgers stay (idempotency and AI allowance accounting are
         # ordinary records); only the plan content they carry is removed.
         changed += m.TrainingPlanGenerationOperation.query.filter(

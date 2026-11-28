@@ -299,7 +299,7 @@ def test_real_receipt_survives_new_engine_and_rejects_unsafe_file(tmp_path):
 # later migrations land (owner-private exercises, the re-landed C1, G4,
 # PD1, PD2, PD5 and PD6). Each ancestor is behind head and must fail --require-at-head.
 # Retired C1 stamp c1a9b7e5d301 is absent from the graph.
-SOURCE_HEAD = '6e25ecb68c09'
+SOURCE_HEAD = 'f14209ba73c6'
 
 
 @pytest.mark.parametrize('current, success', [(None, False), ([], False),

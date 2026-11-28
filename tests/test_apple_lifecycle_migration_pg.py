@@ -212,7 +212,7 @@ def test_full_alembic_chain_and_adoption(migrate_engine, existing):
                 # upgrade() reaches the complete current graph, including the
                 # later allowance dispatch-evidence expansion; the lifecycle
                 # migration's own revision/parent assertions remain separate.
-                assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "6e25ecb68c09"
+                assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "f14209ba73c6"
                 for table, rows in before.items():
                     assert _snapshot(conn)[table] == rows
         finally:
