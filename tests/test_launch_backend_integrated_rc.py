@@ -15,7 +15,7 @@ def test_f01_expansion_follows_the_existing_launch_free_revision():
     assert scripts.get_heads() == ["f14209ba73c6"]  # G4, PD1, PD2, PD5, PD6, analytics v2 and retention
     assert scripts.get_revision("f01c0a1e0001").down_revision == "d8f1a3c5e7b9"
     assert scripts.get_revision("d8f1a3c5e7b9").down_revision == "c6f8b0d2e4a1"
-    assert len(list(scripts.walk_revisions())) == 74
+    assert len(list(scripts.walk_revisions())) == 75
 
 
 @pytest.mark.parametrize("eligibility", [False, True])
