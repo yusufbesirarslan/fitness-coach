@@ -406,9 +406,23 @@ same virtual hosts after the edit.
   Follow-ups are an owner decision: send the backend's FatSecret calls as a POST
   body (this removes the term from the hairpin's request line in both logs), or
   mask or shorten retention on `/axisai/nginx/error`.
-- **R2, path segments.** Concrete paths are still logged as before (for example
-  `/api/v1/nutrition/foods/fatsecret/<food_id>/servings`). nginx cannot
-  template routes the way the app log does.
+- **R2, path segments.** Concrete paths are still logged as before. nginx
+  cannot template routes the way the app log does. **One exception (FatSecret
+  privacy hardening, #547 c7240107959 F2, source only):** the
+  `$axisai_log_path` map's first regex entry logs every
+  `/api/v1/nutrition/foods/fatsecret/<anything>` request as the constant
+  `/api/v1/nutrition/foods/fatsecret/:food_id/servings`. It is caseless (`~*`),
+  tolerates repeated `/`, and accepts each prefix character literal or
+  percent-encoded (`%66atsecret`, `%2f`), because gunicorn decodes the path
+  and Flask routes it. The pattern is derived by a rule that
+  `tests/test_priv_log_01_nginx_access_log.py` re-derives and compares.
+  Method, status, bytes, timing, upstream, `lr`, `rid` and `host` are kept.
+  Residual: spellings the backend never routes (double encoding such as
+  `%2566`, dot segments, a different prefix) keep their literal path, like any
+  unauthenticated path; and the R1 error-log line still carries the raw
+  request line. The live site needs the updated block pasted in the next
+  separately authorized maintenance window, with the host-verified checker
+  readback above; nothing on any host changed with this source edit.
 - **R3, correlation.** `rid` is nginx's own id. The app's 16-hex request id is
   not echoed in a response header, so correlate by time, path and `ua`.
 - **R5, encoded Referer path.** The Referer map drops the query and fragment at

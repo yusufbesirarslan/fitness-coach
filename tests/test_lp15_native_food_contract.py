@@ -16,7 +16,7 @@ from app.services import fatsecret, mobile_auth
 pytestmark = pytest.mark.usefixtures("provider_persistence_permitted")
 
 PREFIX = "/api/v1/nutrition"
-READS = ["/foods/search?q=food", "/foods/fatsecret/A/servings",
+READS = ["/foods/search?q=food", "/foods/fatsecret/1001/servings",
          "/foods/barcode?code=012345678905"]
 NUTRITION = {"energy_kcal": 120.0, "protein_g": 4.0,
              "carbohydrate_g": 20.0, "fat_g": 3.0}
@@ -64,16 +64,16 @@ def upstream(monkeypatch):
         params = kwargs["params"]
         calls.append(deepcopy(params))
         if params["method"] == "foods.search":
-            return Response({"foods": {"food": [food("A"), food("B")]}})
+            return Response({"foods": {"food": [food("1001"), food("1002")]}})
         if params["method"] == "food.find_id_for_barcode":
-            return Response({"food_id": {"value": "A"}})
+            return Response({"food_id": {"value": "1001"}})
         return Response({"food": food(params["food_id"])})
 
     monkeypatch.setattr(fatsecret, "_fs_get", get)
     return calls
 
 
-def command(food_id="A", serving_id="A-1", quantity=1, **extra):
+def command(food_id="1001", serving_id="1001-1", quantity=1, **extra):
     return dict(kind="provider_backed", provider="fatsecret", food_id=food_id,
                 serving_id=serving_id, quantity=quantity, slot="ogle",
                 discovery_source="search", **extra)
@@ -98,13 +98,13 @@ def test_duplicate_name_identity(raw_client, native, upstream):
     assert first.json == {"foods": [
         {"provider": "fatsecret", "food_id": identity,
          "name": "Aynı yemek Çığ Şiş", "brand": "Brand"}
-        for identity in ("A", "B")]}
+        for identity in ("1001", "1002")]}
     user.language = "en"
     db.session.commit()
     refresh = raw_client.get(PREFIX + "/foods/search?q=şiş",
                              headers=dict(headers, **{"Accept-Language": "tr"}))
     assert refresh.json == first.json
-    for identity in ("A", "B"):
+    for identity in ("1001", "1002"):
         detail = raw_client.get(PREFIX + f"/foods/fatsecret/{identity}/servings",
                                 headers=headers)
         assert detail.json["food"]["food_id"] == identity
@@ -113,12 +113,12 @@ def test_duplicate_name_identity(raw_client, native, upstream):
 
 def test_duplicate_serving_label_identity(raw_client, native, upstream):
     _, headers = native
-    response = raw_client.get(PREFIX + "/foods/fatsecret/A/servings", headers=headers)
+    response = raw_client.get(PREFIX + "/foods/fatsecret/1001/servings", headers=headers)
     assert response.status_code == 200
     assert set(response.json["food"]) == {"provider", "food_id", "name", "brand", "servings"}
     options = response.json["food"]["servings"]
     assert [item["description"] for item in options] == ["1 portion", "1 portion"]
-    assert [item["serving_id"] for item in options] == ["A-1", "A-2"]
+    assert [item["serving_id"] for item in options] == ["1001-1", "1001-2"]
     assert set(options[0]) == {"serving_id", "description", "nutrition", "metric_mass",
                                "nutrition_per_100g"}
     assert options[0]["nutrition"] == NUTRITION
@@ -132,7 +132,7 @@ def test_duplicate_serving_label_identity(raw_client, native, upstream):
 
 def test_cross_food_serving(raw_client, native, upstream):
     _, headers = native
-    other = raw_client.get(PREFIX + "/foods/fatsecret/B/servings", headers=headers)
+    other = raw_client.get(PREFIX + "/foods/fatsecret/1002/servings", headers=headers)
     foreign = other.json["food"]["servings"][0]["serving_id"]
     response = raw_client.post(PREFIX + "/logs", json=command(serving_id=foreign), headers=headers)
     error(response, 404, "FOOD_NOT_FOUND")
@@ -195,7 +195,7 @@ def test_barcode_normalization(raw_client, native, upstream, code):
     response = raw_client.get(PREFIX + "/foods/barcode", query_string={"code": code}, headers=native[1])
     assert response.status_code == 200
     assert upstream[0]["barcode"] == code.rjust(13, "0")
-    detail = raw_client.get(PREFIX + "/foods/fatsecret/A/servings", headers=native[1])
+    detail = raw_client.get(PREFIX + "/foods/fatsecret/1001/servings", headers=native[1])
     assert response.json == detail.json
     assert BarcodeFoodCache.query.count() == 0 and MealLog.query.count() == 0
 
@@ -208,12 +208,12 @@ def test_barcode_validation(raw_client, native, upstream, code):
 
 
 def test_barcode_cache_only_reuses_food_identity(raw_client, native, upstream):
-    db.session.add(BarcodeFoodCache(barcode="012345678905", food_id="A", food_name="Legacy",
+    db.session.add(BarcodeFoodCache(barcode="012345678905", food_id="1001", food_name="Legacy",
                                    brand="Old", payload={"servings": [{"id": "100g_calc"}]}))
     db.session.commit()
     response = raw_client.get(PREFIX + "/foods/barcode?code=012345678905", headers=native[1])
     assert response.status_code == 200
-    assert [s["serving_id"] for s in response.json["food"]["servings"]] == ["A-1", "A-2"]
+    assert [s["serving_id"] for s in response.json["food"]["servings"]] == ["1001-1", "1001-2"]
     assert all(p["method"] != "food.find_id_for_barcode" for p in upstream)
     logged = raw_client.post(PREFIX + "/logs", headers=native[1],
                              json=dict(command(), discovery_source="barcode"))
@@ -268,8 +268,8 @@ def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, 
 
 @pytest.mark.parametrize("unit", ["ml", "oz", "", None])
 def test_non_gram_serving_stays_loggable(raw_client, native, upstream, monkeypatch, unit):
-    payload = food("A")
-    payload["servings"]["serving"] = serving("A-1", unit=unit)
+    payload = food("1001")
+    payload["servings"]["serving"] = serving("1001-1", unit=unit)
     monkeypatch.setattr(fatsecret, "_fs_get", lambda *a, **kw: Response({"food": payload}))
     response = raw_client.get(PREFIX + READS[1], headers=native[1])
     option = response.json["food"]["servings"][0]
@@ -298,22 +298,22 @@ def test_malformed_search_payload(raw_client, native, upstream, monkeypatch, pay
 
 
 @pytest.mark.parametrize("options", [[serving("same"), serving("same")],
-                                      [dict(serving("A-1"), serving_id=None)], ["bad"]])
+                                      [dict(serving("1001-1"), serving_id=None)], ["bad"]])
 def test_malformed_serving_identity(raw_client, native, upstream, monkeypatch, options):
-    payload = food("A")
+    payload = food("1001")
     payload["servings"]["serving"] = options
     monkeypatch.setattr(fatsecret, "_fs_get", lambda *a, **kw: Response({"food": payload}))
     error(raw_client.get(PREFIX + READS[1], headers=native[1]), 503, "FOOD_PROVIDER_UNAVAILABLE", True)
 
 
 def test_provider_returned_food_identity_must_match(raw_client, native, upstream, monkeypatch):
-    monkeypatch.setattr(fatsecret, "_fs_get", lambda *a, **kw: Response({"food": food("B")}))
+    monkeypatch.setattr(fatsecret, "_fs_get", lambda *a, **kw: Response({"food": food("1002")}))
     error(raw_client.get(PREFIX + READS[1], headers=native[1]), 503, "FOOD_PROVIDER_UNAVAILABLE", True)
 
 
 def test_normalized_nutrition_cannot_overflow_json(raw_client, native, upstream, monkeypatch):
-    payload = food("A")
-    payload["servings"]["serving"] = serving("A-1", calories="1e308", amount="1e-308")
+    payload = food("1001")
+    payload["servings"]["serving"] = serving("1001-1", calories="1e308", amount="1e-308")
     monkeypatch.setattr(fatsecret, "_fs_get", lambda *a, **kw: Response({"food": payload}))
     error(raw_client.get(PREFIX + READS[1], headers=native[1]), 503, "FOOD_PROVIDER_UNAVAILABLE", True)
 
@@ -325,7 +325,7 @@ def test_serving_fallback_success_and_mixed_failure(raw_client, native, upstream
         calls.append(kw["params"]["method"])
         if len(calls) == 1:
             return Response({"error": {"code": 10}})
-        return Response({"food": food("A")})
+        return Response({"food": food("1001")})
 
     monkeypatch.setattr(fatsecret, "_fs_get", get)
     response = raw_client.get(PREFIX + READS[1], headers=native[1])

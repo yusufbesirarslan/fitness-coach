@@ -21,7 +21,7 @@ from app.extensions import db
 from app.mobile_auth_middleware import require_mobile_auth
 from app.observability import current_request_id
 from app.services import mobile_nutrition
-from app.services import mobile_food_discovery
+from app.services import fatsecret_egress_policy, mobile_food_discovery
 from app.services.barcode import normalize_barcode
 from app.services import meal_idempotency, mobile_log_food
 from app.services import mobile_diary_mutation
@@ -75,6 +75,15 @@ def nutrition_food_search():
     query = request.args.get("q", "").strip()
     if not 2 <= len(query) <= 100:
         return mobile_error("INVALID_FOOD_QUERY", "Invalid food query.", 400, False)
+    rule = fatsecret_egress_policy.withheld_search_rule(query)
+    if rule is not None:
+        # Egress policy: no FatSecret request. The existing empty answer, so
+        # every shipped client shows its no-match copy and manual logging.
+        # Rule label only: never the query or any part of it.
+        current_app.logger.info(
+            "mobile_nutrition event=food_query_withheld rule=%s request_id=%s",
+            rule, current_request_id())
+        return jsonify({"foods": []})
     try:
         return jsonify({"foods": mobile_food_discovery.search(query)})
     except Exception as error:

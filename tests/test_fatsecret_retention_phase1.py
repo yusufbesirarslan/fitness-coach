@@ -33,7 +33,7 @@ DAY_VIEW = "/api/v1/nutrition/day-view"
 H = timedelta(hours=1)
 
 FOOD = {
-    "provider": "fatsecret", "food_id": "food-1", "name": "Provider Oats",
+    "provider": "fatsecret", "food_id": "1001", "name": "Provider Oats",
     "brand": "", "servings": [{
         "serving_id": "serving-1", "description": "1 cup",
         "metric_mass": {"amount": 50.0, "unit": "g"},
@@ -132,7 +132,7 @@ def native(app):
 
 def provider_log(native, headers, quantity=1, slot="kahvalti"):
     return native.post(LOG, headers=headers, json={
-        "kind": "provider_backed", "provider": "fatsecret", "food_id": "food-1",
+        "kind": "provider_backed", "provider": "fatsecret", "food_id": "1001",
         "serving_id": "serving-1", "quantity": quantity, "slot": slot,
         "discovery_source": "search"})
 
@@ -184,7 +184,7 @@ def test_covered_provider_log_is_open_and_stamped_with_acquisition_time(
     assert response.status_code == 201
     row = MealLog.query.filter_by(user_id=user.id).one()
     assert row.source == "search" and row.kalori == 180.0
-    assert row.provider_items == [{"provider": "fatsecret", "food_id": "food-1",
+    assert row.provider_items == [{"provider": "fatsecret", "food_id": "1001",
                                    "serving_id": "serving-1", "quantity": "1.5"}]
     assert before <= row.provider_acquired_at <= datetime.utcnow()
     assert row.provider_expired_at is None
@@ -259,7 +259,7 @@ def test_after_deadline_values_move_into_the_day_total_without_new_entries(
     # Provider name/serving text left storage; IDs and quantity stayed.
     for row in MealLog.query.filter_by(user_id=user.id, source="search").all():
         assert "Provider Oats" not in row.yemekler and "cup" not in row.yemekler
-        assert row.provider_items[0]["food_id"] == "food-1"
+        assert row.provider_items[0]["food_id"] == "1001"
 
 
 def test_expiry_is_idempotent_and_never_double_counts(app, native, device, make_user, provider):
@@ -361,7 +361,7 @@ def test_schedule_bounds_and_zero_traffic_enqueue(app, make_user, provider, monk
         user_id=user.id, ogun="Öğle", yemekler="Provider Oats (1x 1 cup)", kalori=120.0,
         protein=4.0, karb=20.0, yag=3.0, tarih=_yesterday(), source="search",
         created_at=datetime.utcnow() - 72 * H, provider_acquired_at=datetime.utcnow() - 72 * H,
-        provider_items=[provider_retention.provider_component("food-1", "serving-1", 1)]))
+        provider_items=[provider_retention.provider_component("1001", "serving-1", 1)]))
     db.session.commit()
     assert tasks.expire_provider_nutrition()["folded"] == 1
 
@@ -386,8 +386,8 @@ def test_name_cache_is_set_once_and_a_hit_never_refreshes_ttl(
     provider.clear()
     history_day(native, device(user), _yesterday())
     history_day(native, device(user), _yesterday())
-    assert provider == ["food-1"]                              # one live request
-    key = provider_retention.NAME_CACHE_PREFIX + "food-1"
+    assert provider == ["1001"]                              # one live request
+    key = provider_retention.NAME_CACHE_PREFIX + "1001"
     assert [s for s in redis.sets if s[0] == key] == [
         (key, int(timedelta(hours=22).total_seconds()), True)]  # NX, fixed TTL, once
     cached = json.loads(redis.data[key])
@@ -504,7 +504,7 @@ def _saved_meal(user_id, *, acquired_hours_ago, day=None):
     db.session.flush()
     item = CustomMealItem(
         custom_meal_id=meal.id, food_name="Provider Oats", grams=75.0, calories=180.0,
-        protein=6.0, carbs=30.0, fat=4.5, fatsecret_food_id="food-1", serving_id="serving-1",
+        protein=6.0, carbs=30.0, fat=4.5, fatsecret_food_id="1001", serving_id="serving-1",
         serving_description="1 cup", serving_quantity=1.5, per_100g_calories=240.0,
         per_100g_protein=8.0, per_100g_carbs=40.0, per_100g_fat=6.0,
         provider_acquired_at=datetime.utcnow() - timedelta(hours=acquired_hours_ago))
@@ -521,7 +521,7 @@ def test_saved_meal_scrub_keeps_quantity_grams_and_ids(app, make_user):
     assert provider_retention.expire_due().scrubbed_items == 1
     db.session.refresh(item)
     assert (item.fatsecret_food_id, item.serving_id, item.serving_quantity, item.grams) == (
-        "food-1", "serving-1", 1.5, 75.0)
+        "1001", "serving-1", 1.5, 75.0)
     assert (item.calories, item.per_100g_calories, item.food_name, item.serving_description) == (
         0, None, "FatSecret", None)
     db.session.refresh(typed)
@@ -537,7 +537,7 @@ def test_saved_meal_reuse_resolves_live_after_scrub(app, client, auth_user, prov
     assert logged.kalori == round(180.0 + 90.0, 1)                   # 1.5 x 120 live + typed
     assert logged.provider_acquired_at is not None
     assert [c.get("food_id") or c.get("text") for c in logged.provider_items] == [
-        "food-1", "Ev salatası (100g)"]
+        "1001", "Ev salatası (100g)"]
     db.session.refresh(item)
     assert item.provider_expired_at is None and item.food_name == "Provider Oats"
 
@@ -552,7 +552,7 @@ def test_saved_meal_reuse_fails_closed_when_the_provider_is_down(app, client, au
     assert not db.session.get(CustomMeal, meal.id).is_logged
 
 
-def _add_provider_item(meal_id, food_id="food-1"):
+def _add_provider_item(meal_id, food_id="1001"):
     db.session.add(CustomMealItem(
         custom_meal_id=meal_id, food_name="Provider Oats", grams=50.0, calories=120.0,
         protein=4.0, carbs=20.0, fat=3.0, fatsecret_food_id=food_id, serving_id="serving-1",
@@ -598,8 +598,8 @@ def test_repeat_of_a_summary_from_history_carries_no_provider_name(
     so its description must hold no provider text a copy could store."""
     user = make_user("ret-repeat-summary")
     day = _yesterday()
-    components = [provider_retention.provider_component("food-1", "serving-1", 1),
-                  provider_retention.provider_component("food-2", "serving-1", 2)]
+    components = [provider_retention.provider_component("1001", "serving-1", 1),
+                  provider_retention.provider_component("1002", "serving-1", 2)]
     db.session.add(MealLog(
         user_id=user.id, ogun="Öğle", yemekler="Provider Oats (1x 1 cup), Provider Oats (2x 1 cup)",
         kalori=360.0, protein=12.0, karb=60.0, yag=9.0, tarih=day, source="diary",
@@ -629,7 +629,7 @@ def test_web_history_and_today_conserve_totals(app, client, auth_user, redis, pr
         user_id=auth_user.id, ogun="Öğle", yemekler="Provider Oats (1x 1 cup)", kalori=120.0,
         protein=4.0, karb=20.0, yag=3.0, tarih=day, source="search",
         created_at=datetime.utcnow() - 30 * H, provider_acquired_at=datetime.utcnow() - 30 * H,
-        provider_items=[provider_retention.provider_component("food-1", "serving-1", 1)]))
+        provider_items=[provider_retention.provider_component("1001", "serving-1", 1)]))
     db.session.commit()
     before = client.get("/meal-log/history").get_json()
     provider_retention.expire_due()
@@ -761,10 +761,10 @@ def test_shared_macro_cache_writers_are_only_the_builtin_table_and_the_llm():
 
 def test_food_id_map_holds_no_provider_text():
     foodcache._food_id_cache.clear()
-    foodcache._cache_food_id("Provider Oats", "food-1")
+    foodcache._cache_food_id("Provider Oats", "1001")
     assert list(foodcache._food_id_cache) == [foodcache._food_id_key("provider oats")]
     assert "Provider Oats".lower() not in foodcache._food_id_cache
-    assert foodcache._get_cached_food_id("PROVIDER OATS") == "food-1"
+    assert foodcache._get_cached_food_id("PROVIDER OATS") == "1001"
     foodcache._food_id_cache.clear()
 
 

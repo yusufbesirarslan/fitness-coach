@@ -43,19 +43,28 @@ def _format_directive(tree):
                 and d.args[0].value == privacy.FORMAT)
 
 
-def _map_regex(tree, variable):
+def _map_entries(tree, variable):
+    """The map's regex entries in source order, and its default."""
     block = next(d for d, _ in sw._walk(tree) if d.name.value == "map"
                  and d.args[1].value == variable).block
-    entries = {d.name.value: d.args[0].value for d in block}
-    pattern = next(key for key in entries if key.startswith("~"))
-    return re.compile(pattern[1:].replace("(?<", "(?P<")), entries["default"]
+    entries = [(d.name.value, d.args[0].value) for d in block]
+    regexes = []
+    for key, value in entries:
+        if key.startswith("~"):
+            flags, pattern = (re.IGNORECASE, key[2:]) if key.startswith("~*") else (0, key[1:])
+            regexes.append((re.compile(pattern.replace("(?<", "(?P<"), flags), value))
+    return regexes, dict(entries)["default"]
 
 
 def nginx_map(variable, value):
-    """The map's first-match semantics, emulated with the reviewed regex."""
-    regex, default = _map_regex(sw.parse_nginx(TEMPLATE), variable)
-    match = regex.search(value)
-    return match.group(1) if match else default
+    """The map's first-match semantics (regexes in order, ~* caseless),
+    emulated with the reviewed regexes; a ``$name`` value is that capture."""
+    regexes, default = _map_entries(sw.parse_nginx(TEMPLATE), variable)
+    for regex, out in regexes:
+        match = regex.search(value)
+        if match:
+            return match.group(out[1:]) if out.startswith("$") else out
+    return default
 
 
 # --- before: the leak exists in every audited configuration ------------------------------------
@@ -119,6 +128,98 @@ def test_operational_variables_are_allowed(variable):
 ])
 def test_path_map_drops_the_query_string(request_uri, logged):
     assert nginx_map("$axisai_log_path", request_uri) == logged
+
+
+# --- FatSecret detail segment (#547 c7240107959 F2, source only) ---------------------------------
+
+FATSECRET_DETAIL = "/api/v1/nutrition/foods/fatsecret/:food_id/servings"
+DETAIL_SEGMENTS = ("api", "v1", "nutrition", "foods", "fatsecret")
+
+
+def _encoded_or_literal(char):
+    """One prefix character, literal or percent-encoded (either case)."""
+    if char == "/":
+        return "(?:/|%2f)"
+    if char.isdigit():
+        return f"(?:{char}|%3{char})"
+    code = ord(char)
+    return f"(?:{char}|%[{(code >> 4) - 2}{code >> 4}]{code & 15:x})"
+
+
+def _reviewed_detail_pattern():
+    slash = "(?:/|%2f)+"
+    return ("~*^" + slash + slash.join("".join(map(_encoded_or_literal, segment))
+                                        for segment in DETAIL_SEGMENTS) + "(?:/|%2f)")
+
+
+def test_detail_mask_is_the_reviewed_derivation_and_precedes_the_generic_capture():
+    block = next(d for d, _ in sw._walk(sw.parse_nginx(TEMPLATE)) if d.name.value == "map"
+                 and d.args[1].value == "$axisai_log_path").block
+    assert [(d.name.value, d.args[0].value) for d in block] == [
+        ("default", "-"),
+        (_reviewed_detail_pattern(), FATSECRET_DETAIL),
+        ("~^(?<axisai_lp>[^?]+)", "$axisai_lp"),
+    ]
+
+
+@pytest.mark.parametrize("request_uri", [
+    "/api/v1/nutrition/foods/fatsecret/35755/servings",
+    "/api/v1/nutrition/foods/fatsecret/35755/servings?q=PRIVLOG01",
+    "/api/v1/nutrition/foods/fatsecret/john%20doe/servings",
+    "/api/v1/nutrition/foods/fatsecret/a%40b.co/servings",
+    "/api/v1/nutrition/foods/fatsecret/%D9%A3%D9%A5/servings",
+    "/api/v1/nutrition/foods/fatsecret/" + "9" * 200 + "/servings",
+    "/api/v1/nutrition/foods/fatsecret/x",
+    "/api/v1/nutrition/foods/fatsecret/",
+    "/api/v1/nutrition/foods/fatsecret//servings",
+    "/API/V1/Nutrition/Foods/FatSecret/PRIVLOG01/servings",
+    "//api//v1/nutrition/foods/fatsecret/PRIVLOG01/servings",
+    "///api/v1///nutrition//foods////fatsecret//PRIVLOG01/servings",
+    "/api/v1/nutrition/foods/%66atsecret/PRIVLOG01/servings",
+    "/api/v1/nutrition/foods/%46AT%53ECRET/PRIVLOG01/servings",
+    "/%61%70%69/%76%31/%6e%75%74%72%69%74%69%6f%6e/%66%6f%6f%64%73/%66%61%74%73%65%63%72%65%74/"
+    "PRIVLOG01/servings",
+    "/api%2fv1%2Fnutrition/foods/fatsecret%2fPRIVLOG01/servings",
+    "%2fapi/v1/nutrition/foods/fatsecret/PRIVLOG01/servings",
+])
+def test_fatsecret_detail_segment_is_masked(request_uri):
+    assert nginx_map("$axisai_log_path", request_uri) == FATSECRET_DETAIL
+
+
+@pytest.mark.parametrize("request_uri, logged", [
+    ("/api/v1/nutrition/foods/search?q=anything", "/api/v1/nutrition/foods/search"),
+    ("/api/v1/nutrition/foods/barcode?code=8690000000017", "/api/v1/nutrition/foods/barcode"),
+    ("/api/v1/nutrition/diary/today", "/api/v1/nutrition/diary/today"),
+    ("/api/v1/nutrition/logs", "/api/v1/nutrition/logs"),
+    ("/api/v1/nutrition/foods/fatsecret", "/api/v1/nutrition/foods/fatsecret"),
+    ("/api/v1/nutrition/foods/fatsecretx/1/servings", "/api/v1/nutrition/foods/fatsecretx/1/servings"),
+    ("/api/v1/nutrition/foods/fatsecre/1", "/api/v1/nutrition/foods/fatsecre/1"),
+    ("/api/v2/nutrition/foods/fatsecret/1/servings", "/api/v2/nutrition/foods/fatsecret/1/servings"),
+    ("/x/api/v1/nutrition/foods/fatsecret/1/servings", "/x/api/v1/nutrition/foods/fatsecret/1/servings"),
+    ("/fatsecret/rest/server.api?food_id=1", "/fatsecret/rest/server.api"),
+    ("/api/food/35755/servings", "/api/food/35755/servings"),       # browser route, unchanged
+    ("/api/v1/nutrition/foods/%2566atsecret/1/servings",          # double-encoded: not routed
+     "/api/v1/nutrition/foods/%2566atsecret/1/servings"),
+])
+def test_other_routes_keep_their_existing_logged_path(request_uri, logged):
+    assert nginx_map("$axisai_log_path", request_uri) == logged
+
+
+def _wsgi_path(request_uri):
+    """What gunicorn hands Flask: the percent-decoded path (PATH_INFO)."""
+    from urllib.parse import unquote
+    return unquote(request_uri.split("?", 1)[0])
+
+
+@pytest.mark.parametrize("raw", [
+    "/api/v1/nutrition/foods/%66atsecret/x/servings",
+    "/%61pi/v%31/nutrition/foods/fatsecret/x/servings",
+    "/api%2Fv1/nutrition/foods/fatsecret/x/servings",
+    "/api/v1/nutrition/foods/fatsecre%74/x/servings",
+])
+def test_every_encoded_spelling_that_decodes_to_the_route_is_masked(raw):
+    assert _wsgi_path(raw) == "/api/v1/nutrition/foods/fatsecret/x/servings"
+    assert nginx_map("$axisai_log_path", raw) == FATSECRET_DETAIL
 
 
 @pytest.mark.parametrize("referer, logged", [
@@ -249,3 +350,35 @@ def test_cli_fails_closed_on_template_with_unresolved_includes():
     proc = subprocess.run([sys.executable, "-I", str(ROOT / "scripts" / "axisai_nginx_log_privacy.py"),
                            str(ROOT / "nginx.conf")], capture_output=True, text=True, timeout=30)
     assert proc.returncode == privacy.EXIT_USAGE and "unresolved include" in proc.stderr
+
+
+def _spellings(char):
+    """Every spelling of one prefix character that gunicorn decodes back to it
+    (literal, upper case, percent-encoded with either hex case)."""
+    code = f"{ord(char):02x}"
+    out = {char, char.upper(), "%" + code, "%" + code.upper()}
+    if char.isalpha():
+        upper = f"{ord(char.upper()):02x}"
+        out |= {"%" + upper, "%" + upper.upper()}
+    return sorted(out)
+
+
+def test_each_prefix_character_in_every_spelling_is_masked():
+    prefix = "/api/v1/nutrition/foods/fatsecret/"
+    checked = 0
+    for index, char in enumerate(prefix):
+        for spelling in _spellings(char):
+            uri = prefix[:index] + spelling + prefix[index + 1:] + "PRIVLOG01/servings"
+            assert nginx_map("$axisai_log_path", uri) == FATSECRET_DETAIL, uri
+            checked += 1
+    assert checked == 138   # 35 characters, every spelling
+
+
+def test_random_mixed_spellings_are_masked():
+    import random
+    rng = random.Random(547)
+    prefix = "/api/v1/nutrition/foods/fatsecret/"
+    for _ in range(500):
+        uri = "".join(rng.choice(_spellings(c)) * (rng.randint(1, 3) if c == "/" else 1)
+                      for c in prefix) + "PRIVLOG01/servings?q=PRIVLOG01"
+        assert nginx_map("$axisai_log_path", uri) == FATSECRET_DETAIL, uri

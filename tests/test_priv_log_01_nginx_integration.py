@@ -196,3 +196,48 @@ def test_r1_real_nginx_adversarial_leaks_are_rejected(nginx, writer):
         ngx.stop()
     records = leak.read_bytes() if writer == 'include-log' else access_log(ngx)
     assert b'SYNTHETIC_R1_CANARY' in records, 'adversarial configuration must actually leak'
+
+
+DETAIL = "/api/v1/nutrition/foods/fatsecret/:food_id/servings"
+DETAIL_TARGETS = [
+    "/api/v1/nutrition/foods/fatsecret/35755/servings",
+    "/api/v1/nutrition/foods/fatsecret/PRIVLOG01-detail%20name/servings",
+    "/api/v1/nutrition/foods/fatsecret/PRIVLOG01-detail%40mail.co/servings?q=PRIVLOG01-q",
+    "/API/V1/Nutrition/Foods/FatSecret/PRIVLOG01-case/servings",
+    "//api//v1/nutrition/foods/fatsecret/PRIVLOG01-slash/servings",
+    "/api/v1/nutrition/foods/%66atsecret/PRIVLOG01-encoded/servings",
+    "/api%2Fv1/nutrition/foods/fatsecre%74/PRIVLOG01-encoded2/servings",
+    # absolute-form request line: nginx's $request_uri is the path part
+    f"https://{HOST}/api/v1/nutrition/foods/fatsecret/PRIVLOG01-absolute/servings",
+]
+
+
+def test_fatsecret_detail_segment_is_masked_and_diagnostics_kept(nginx):
+    """#547 c7240107959 F2 (source only): the caller's detail segment never
+    reaches the access log; forwarding, status, latency, upstream, limit and
+    request-id fields are unchanged, and unrelated routes keep their path."""
+    ngx = nginx
+    ngx.write_include(ngx.ports["legacy"])
+    ngx.write_site(runnable(ngx, patch_site(MIGRATED)))
+    assert privacy.check(ngx.dump(), TEMPLATE)[0] == []
+    offset = len(access_log(ngx))
+    ngx.start()
+    try:
+        seen = [request(ngx, path=target, headers={"Authorization": "Bearer " + TOKEN})[0]
+                for target in DETAIL_TARGETS]
+        other = request(ngx, path="/api/v1/nutrition/diary/today")[0]
+    finally:
+        ngx.stop()
+    log = access_log(ngx)[offset:].decode("utf-8", "replace")
+    for forbidden in ("PRIVLOG01", "35755", "Bearer", "?", "%"):
+        assert forbidden not in log, forbidden
+    rows = [LINE.match(line) for line in log.splitlines()]
+    assert len(rows) == len(DETAIL_TARGETS) + 1 and all(rows), log
+    detail, unrelated = [m.groupdict() for m in rows[:-1]], rows[-1].groupdict()
+    assert {r["path"] for r in detail} == {DETAIL}
+    assert [int(r["status"]) for r in detail] == seen
+    for row in detail:
+        assert (row["method"], row["proto"], row["host"], row["lr"]) == ("GET", "HTTP/1.1", HOST, "PASSED")
+        assert row["us"] != "-" and row["upstream"] != "-" and float(row["rt"]) >= 0
+    assert len({r["rid"] for r in detail}) == len(DETAIL_TARGETS)
+    assert unrelated["path"] == "/api/v1/nutrition/diary/today" and int(unrelated["status"]) == other

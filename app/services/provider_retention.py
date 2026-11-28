@@ -46,6 +46,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, select
 
 from app.extensions import db
+from app.services import fatsecret_egress_policy
 from app.models import (BarcodeFoodCache, CustomMeal, CustomMealItem, MealLog,
                         MealLogRetainedTotal)
 
@@ -512,6 +513,11 @@ class LiveNames:
     def _food(self, food_id):
         if food_id in self._foods:
             return self._foods[food_id]
+        if fatsecret_egress_policy.canonical_food_id(food_id) is None:
+            # Egress policy: never a lookup, so no budget is spent and the
+            # request is not marked failed; later valid IDs still resolve.
+            self._foods[food_id] = None
+            return None
         food = _cached_food(food_id)
         if food is None and not self._failed and self._lookups > 0:
             self._lookups -= 1

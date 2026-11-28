@@ -2,7 +2,7 @@
 import math
 
 from app.models import BarcodeFoodCache
-from app.services import fatsecret, launch_food_search
+from app.services import fatsecret, fatsecret_egress_policy, launch_food_search
 from app.services.ai_gate import blocking_concurrency_slot
 from app.services.barcode import normalize_barcode
 
@@ -105,6 +105,9 @@ def search(query):
     # sonra eklendi). Kapasite dolduğunda BlockingConcurrencyLimit route'un
     # mevcut `except Exception` yoluna düşer → FOOD_PROVIDER_UNAVAILABLE 503
     # retryable=True, yani istemci için doğru semantik.
+    if fatsecret_egress_policy.withheld_search_rule(query) is not None:
+        # Egress policy: the existing empty answer, before any slot or token.
+        return []
     with blocking_concurrency_slot():
         foods = fatsecret._food_search_raw(query, strict=True)
     return [{
@@ -117,6 +120,11 @@ def search(query):
 
 def servings(food_id):
     launch_food_search.require_available()
+    # Egress policy: a non-canonical ID is a miss (404 FOOD_NOT_FOUND, save
+    # ProviderFoodNotFound, LiveNames placeholder) before any slot or token.
+    food_id = fatsecret_egress_policy.canonical_food_id(food_id)
+    if food_id is None:
+        return None
     with blocking_concurrency_slot():
         raw = fatsecret._food_get_raw(food_id, strict=True)
     return project_food(food_id, raw) if raw else None
