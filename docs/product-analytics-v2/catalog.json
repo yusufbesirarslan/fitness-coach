@@ -20,6 +20,9 @@
     "max_body_bytes": 16384,
     "occurred_at_window_seconds": {"past": 86400, "future": 300}
   },
+  "delta_pending_review": {
+    "DELTA-1 (2026-11-28)": ["axis_v2_coach_mutation_applied.domain=nutrition", "axis_v2_coach_change_proposed", "axis_v2_coach_change_confirmed"]
+  },
   "events": {
     "axis_v2_analytics_enabled": {
       "authority": "server", "properties": {},
@@ -52,9 +55,19 @@
       "kpis": ["coach_adoption", "meaningful_activity", "retention"]
     },
     "axis_v2_coach_mutation_applied": {
-      "authority": "server", "properties": {"domain": ["training"]},
-      "trigger": "plan_mutation.apply_plan_mutation committed outcome=applied with actor=ai_coach. no_op, replayed, refused and undo are not counted. Nutrition WRITE value is NOT in the enum until that writer exists and is reviewed.",
+      "authority": "server", "properties": {"domain": ["training", "nutrition"]},
+      "trigger": "training: plan_mutation.apply_plan_mutation committed outcome=applied with actor=ai_coach (direct or after confirmation). nutrition: nutrition_plan_mutation.resolve_edit committed a confirmed Coach Nutrition Plan edit (applied). no_op, replayed, refused, cancelled, stale and undo are not counted. DELTA-1: the nutrition value is pending catalog review.",
       "kpis": ["coach_authorized_mutation_success"]
+    },
+    "axis_v2_coach_change_proposed": {
+      "authority": "server", "properties": {"domain": ["training", "nutrition"]},
+      "trigger": "A NEW pending Coach change proposal (the user must confirm) was committed. training: plan_confirmation.create_or_reuse_pending inserted a non-undo proposal (reuse of the identical pending proposal is not a new one). nutrition: nutrition_plan_mutation published a prepared edit proposal. Chat messages, tool calls, refusals and direct applies are not proposals. DELTA-1, pending catalog review.",
+      "kpis": ["coach_proposal_acceptance_denominator"]
+    },
+    "axis_v2_coach_change_confirmed": {
+      "authority": "server", "properties": {"domain": ["training"]},
+      "trigger": "plan_confirmation.mark_applied performed the pending->applied transition of a non-undo training proposal after its mutation committed. Nutrition confirmations are axis_v2_coach_mutation_applied{domain=nutrition} (every Nutrition edit is confirmed), so no nutrition value exists here. DELTA-1, pending catalog review.",
+      "kpis": ["coach_proposal_acceptance_numerator"]
     },
     "axis_v2_weekly_checkin_submitted": {
       "authority": "server", "properties": {},
