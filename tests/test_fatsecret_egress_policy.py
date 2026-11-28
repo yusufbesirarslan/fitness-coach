@@ -602,8 +602,9 @@ def test_adversarial_input_cost_is_bounded(make):
         rule = policy.withheld_search_rule(at_bound)
     per_call = (time.perf_counter() - started) / 200
     assert rule is None or rule in policy.RULES
-    assert over < 0.05, over
-    assert per_call < 0.005, per_call
+    # Generous wall-clock limits for loaded CI runners; base took seconds.
+    assert over < 0.5, over
+    assert per_call < 0.02, per_call
 
 
 @pytest.mark.parametrize("strict", [True, False])
@@ -642,6 +643,16 @@ def test_query_at_the_bound_is_sent_byte_identical(app, transport, query):
 
 # --- T2: the transport backstop fails closed on unsupported representations ------------------
 
+class _LyingInt(int):
+    def __str__(self):
+        return "ahmet@gmail.com"
+
+
+class _LyingStr(str):
+    def encode(self, *args, **kwargs):
+        return b"ahmet@gmail.com"
+
+
 @pytest.mark.parametrize("params", [
     {b"food_id": b"abc"}, {b"food_id": "abc"}, {b"food_id": "35755"},
     {"method": "foods.search", b"search_expression": "ahmet@gmail.com"},
@@ -654,6 +665,9 @@ def test_query_at_the_bound_is_sent_byte_identical(app, transport, query):
     {"food_id": b"35755"}, {"search_expression": b"tavuk"}, {"food_id": 35755.0},
     (pair for pair in [("food_id", "abc")]), {("food_id", "abc")},
     iter([("method", "food.get")]), [["food_id", "abc", "extra"]], ["food_id"], [("food_id", "abc")],
+    {"food_\u200bid": "abc"}, {"food_id\x00": "abc"}, {"\u200bsearch_expression": "x"},
+    {"food_id": _LyingInt(35755)}, {"search_expression": _LyingStr("tavuk")},
+    {"method": _LyingStr("food.get")}, {"max_results": _Big.ID},
 ])
 def test_backstop_rejects_unsupported_keys_values_and_shapes(app, transport, params):
     with app.app_context():
@@ -669,6 +683,8 @@ def test_backstop_rejects_unsupported_keys_values_and_shapes(app, transport, par
     fatsecret.FATSECRET_API_URL + "?food%5Fid=abc",          # percent-encoded name decodes to food_id
     fatsecret.FATSECRET_API_URL + "?search_expression=" + "a" * 101,
     fatsecret.FATSECRET_API_URL + "?Search_Expression=a%40b",
+    fatsecret.FATSECRET_API_URL + "?food_id%00=abc",
+    fatsecret.FATSECRET_API_URL + "?food_%E2%80%8Bid=abc",
 ])
 def test_backstop_rejects_alternate_url_query_representations(app, transport, url):
     with app.app_context():

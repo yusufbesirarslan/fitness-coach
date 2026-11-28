@@ -79,14 +79,17 @@ def _screened_name(name):
 
     ``requests`` sends a ``bytes`` name as is and ``str()``s other types, so
     only a plain ``str`` name is supported. A spelling that folds to a
-    screened name but is not exactly it (case, width, whitespace) is refused:
-    it would leave unscreened under a name the provider may still read.
+    screened name but is not exactly it (case, width, whitespace, control or
+    format characters) is refused: it would leave unscreened under a name the
+    provider may still read.
     """
     if type(name) is not str:
         raise ProviderRequestWithheld
     if name in _SCREENED_NAMES:
         return name
-    folded = unicodedata.normalize("NFKC", name).strip().casefold()
+    folded = "".join(ch for ch in unicodedata.normalize("NFKC", name)
+                     if unicodedata.category(ch) not in ("Cc", "Cf"))
+    folded = folded.strip().casefold()
     if folded in _SCREENED_NAMES:
         raise ProviderRequestWithheld
     return None
@@ -98,12 +101,14 @@ def _require_screened(url, params):
     The canonical callers screen before any token or slot; this catches any
     other present or future caller. It raises before the session is touched,
     so no request, retry or fallback can follow. No value is ever logged.
-    Values must be a ``str`` or a non-bool ``int`` (what the callers send);
-    a list, ``bytes``, ``None`` or any other value type is refused.
+    Values must be exactly a ``str`` or an ``int`` (what the callers send);
+    a subclass (``bool``, or one overriding ``__str__``/``encode``, which
+    could screen one value and send another), a list, ``bytes``, ``None`` or
+    any other value type is refused.
     """
     for name, value in _screened_params(url, params):
         screened = _screened_name(name)
-        if isinstance(value, bool) or not isinstance(value, (str, int)):
+        if type(value) not in (str, int):
             raise ProviderRequestWithheld
         if screened == "food_id":
             if fatsecret_egress_policy.canonical_food_id(value) is None:

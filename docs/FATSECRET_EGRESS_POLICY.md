@@ -44,8 +44,8 @@ The backstop screens `food_id` and `search_expression` in both `params` and the 
 
 - params other than `None`, a mapping or a list/tuple of 2-item pairs (a raw `str` or `bytes` query, a generator, a set);
 - a parameter name that is not a plain `str`. `requests` sends a `bytes` name as is, so `b"food_id"` would otherwise leave unscreened;
-- a name that folds to a screened name without being exactly it (`FOOD_ID`, `food_id `, fullwidth forms);
-- a value that is not a `str` or a non-bool `int` (a list, `bytes`, `None`, `bool`, a float);
+- a name that folds (NFKC, `Cc`/`Cf` removed, strip, casefold) to a screened name without being exactly it (`FOOD_ID`, `food_id `, fullwidth forms, a zero-width or NUL character such as `?food_id%00=`);
+- a value whose type is not exactly `str` or `int` (a subclass such as `bool` or one overriding `__str__`, a list, `bytes`, `None`, a float);
 - a non-`str` URL;
 - a GET with a `data`, `json` or `files` body.
 
@@ -60,8 +60,8 @@ The switch is involved in four places, and the local policy checks sit between t
 | Layer | Where | While the switch is closed |
 |---|---|---|
 | A. Request gate | `launch_food_search.install` (`before_request`): the native discovery endpoints and the browser `food` blueprint | 404 `FOOD_SEARCH_UNAVAILABLE` before auth, so the native route's own policy check never runs |
-| B. Discovery entry | `mobile_food_discovery.search` / `servings` / `barcode_lookup` call `require_available()` **first**, then the policy check | `FoodSearchExcluded` before the policy check |
-| C. Early local policy checks | `_food_get_raw`, `_food_search_raw` and `LiveNames._food` screen **before** any switch check | **They still run.** They are pure and local. A withheld query or invalid ID returns the caller's empty answer and writes one rule-label log line. No token, slot, request or provider content is involved. |
+| B. Discovery entry | `mobile_food_discovery.search` / `servings` / `barcode_lookup` call `require_available()` **first**. Then `search` and `servings` run the policy check. `barcode_lookup` validates its ASCII-digit code (barcode has no text query), and the ID it resolves goes through `servings`. | `FoodSearchExcluded` before any policy check |
+| C. Early local policy checks | `_food_get_raw`, `_food_search_raw` and `LiveNames._food` screen **before** any switch check | **They still run.** They are pure and local. A withheld query or invalid ID returns the caller's empty answer. `_food_get_raw` and `_food_search_raw` write one rule-label log line; `LiveNames._food` writes none. No token, slot, request or provider content is involved. |
 | D. Token-acquisition gate | `_get_fatsecret_token` calls `require_available()` first, before even a warm token cache | `FoodSearchExcluded`. The service paths turn it into their existing unavailable answer. |
 | E. Transport gate | `_fs_get` / `_fs_post` call `require_available()`, then (GET only) the `_require_screened` backstop, then the session | `FoodSearchExcluded` before the backstop |
 
@@ -77,7 +77,7 @@ Outbound provider authority is `launch_food_search.available()`. It needs the ho
 
 ## Legacy callers in the target release
 
-Every legacy FatSecret caller outside the native journey fetches its token through `_get_fatsecret_token`. That function refuses at layer 2 unless the current request endpoint is one of the three native release endpoints. This holds even with `FITX_FOOD_SEARCH_ENABLED=1`. So in the target release no legacy path can acquire a token or send a request, whether the query is withheld or not.
+Every legacy FatSecret caller outside the native journey fetches its token through `_get_fatsecret_token`. That function refuses at layer D unless the current request endpoint is one of the three native release endpoints. This holds even with `FITX_FOOD_SEARCH_ENABLED=1`. So in the target release no legacy path can acquire a token or send a request, whether the query is withheld or not.
 
 | Caller | Exclusion evidence (in source) |
 |---|---|
@@ -88,7 +88,7 @@ Every legacy FatSecret caller outside the native journey fetches its token throu
 | Barcode name lookup (`_food_find_by_barcode`) | It is reached only from browser barcode routes and `barcode.get_barcode_product`. Barcode is excluded from `NATIVE_RELEASE_ENDPOINTS` on purpose. |
 | Workers and other non-request callers | There is no request context, so `_native_release_scope()` is false |
 
-The native release endpoints screen before the token on every path (layer 1). Because the legacy paths are already excluded, the stabilization changes none of them. `test_legacy_callers_cannot_take_a_token_with_the_flag_on` pins the exclusion. Reopening any legacy path would need its own decision, and that decision must screen before `_get_fatsecret_token`.
+The native release endpoints screen before the token on every path (layers A–C). Because the legacy paths are already excluded, the stabilization changes none of them. `test_legacy_callers_cannot_take_a_token_with_the_flag_on` pins the exclusion. Reopening any legacy path would need its own decision, and that decision must screen before `_get_fatsecret_token`.
 
 ## Unchanged
 
