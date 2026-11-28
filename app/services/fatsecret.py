@@ -3,6 +3,7 @@ import os
 import re
 import threading
 import time
+import unicodedata
 import requests as http_requests_lib
 from collections.abc import Mapping
 from urllib.parse import parse_qsl, urlsplit
@@ -41,23 +42,57 @@ def _get_fs_session():
         return _fs_session
 
 
+# The only parameter names whose values the egress policy screens.
+_SCREENED_NAMES = ("food_id", "search_expression")
+# GET request-body arguments: a body is never screened, so a GET has none.
+_GET_BODY_ARGUMENTS = ("data", "json", "files")
+
+
 def _screened_params(url, params):
-    """Every (name, value) a GET would send, or ProviderRequestWithheld."""
+    """Every (name, value) a GET would send, or ProviderRequestWithheld.
+
+    Only the shapes the callers use are accepted: ``None``, a mapping, or a
+    list/tuple of 2-item list/tuple pairs. A raw ``str``/``bytes`` query
+    string, a generator, a set or any other iterable is refused, because it
+    cannot be screened without consuming or re-implementing its encoding.
+    """
+    if not isinstance(url, str):
+        raise ProviderRequestWithheld  # a bytes URL parses to bytes names
     pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
     if params is None:
         return pairs
     if isinstance(params, Mapping):
-        items = params.items()
-    elif isinstance(params, (str, bytes)):
-        raise ProviderRequestWithheld  # an unscreenable raw query string
+        items = list(params.items())
+    elif isinstance(params, (list, tuple)):
+        items = []
+        for pair in params:
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise ProviderRequestWithheld
+            items.append(tuple(pair))
     else:
-        try:
-            items = [tuple(pair) for pair in params]
-        except TypeError:
-            raise ProviderRequestWithheld from None
-        if any(len(pair) != 2 for pair in items):
-            raise ProviderRequestWithheld
-    return pairs + list(items)
+        raise ProviderRequestWithheld  # str, bytes, generator, set, other
+    return pairs + items
+
+
+def _screened_name(name):
+    """The policy-screened name ``name`` spells, or ``None`` for any other.
+
+    ``requests`` sends a ``bytes`` name as is and ``str()``s other types, so
+    only a plain ``str`` name is supported. A spelling that folds to a
+    screened name but is not exactly it (case, width, whitespace, control or
+    format characters) is refused: it would leave unscreened under a name the
+    provider may still read.
+    """
+    if type(name) is not str:
+        raise ProviderRequestWithheld
+    if name in _SCREENED_NAMES:
+        return name
+    folded = "".join(ch for ch in unicodedata.normalize("NFKC", name)
+                     if unicodedata.category(ch) not in ("Cc", "Cf"))
+    folded = folded.strip().casefold()
+    if folded in _SCREENED_NAMES:
+        raise ProviderRequestWithheld
+    return None
 
 
 def _require_screened(url, params):
@@ -66,12 +101,19 @@ def _require_screened(url, params):
     The canonical callers screen before any token or slot; this catches any
     other present or future caller. It raises before the session is touched,
     so no request, retry or fallback can follow. No value is ever logged.
+    Values must be exactly a ``str`` or an ``int`` (what the callers send);
+    a subclass (``bool``, or one overriding ``__str__``/``encode``, which
+    could screen one value and send another), a list, ``bytes``, ``None`` or
+    any other value type is refused.
     """
     for name, value in _screened_params(url, params):
-        if name == "food_id":
+        screened = _screened_name(name)
+        if type(value) not in (str, int):
+            raise ProviderRequestWithheld
+        if screened == "food_id":
             if fatsecret_egress_policy.canonical_food_id(value) is None:
                 raise ProviderRequestWithheld
-        elif name == "search_expression":
+        elif screened == "search_expression":
             if fatsecret_egress_policy.withheld_search_rule(value) is not None:
                 raise ProviderRequestWithheld
 
@@ -79,6 +121,8 @@ def _require_screened(url, params):
 def _fs_get(url, **kwargs):
     """GET request to FatSecret API."""
     launch_food_search.require_available()
+    if any(kwargs.get(argument) is not None for argument in _GET_BODY_ARGUMENTS):
+        raise ProviderRequestWithheld
     _require_screened(url, kwargs.get("params"))
     kwargs.setdefault("timeout", 10)
     return _get_fs_session().get(url, **kwargs)

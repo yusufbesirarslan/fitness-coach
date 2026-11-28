@@ -11,6 +11,11 @@ retry, method fallback or concurrency slot:
   existing empty result. The query is NEVER rewritten: normalisation below is
   for detection only, and an allowed query leaves byte-for-byte as given.
 
+``withheld_search_rule`` first bounds its own work: a query longer than
+``MAX_QUERY_CHARS`` (the native search contract, 2–100 characters) is
+withheld as ``length`` before any normalisation or regex runs. It is never
+truncated.
+
 Diagnostics may carry the returned rule label only. Never log the query, its
 normalised form or the matched substring.
 
@@ -25,7 +30,14 @@ import unicodedata
 LONG_MAX = 2 ** 63 - 1
 _FOOD_ID = re.compile(r"[1-9][0-9]{0,18}")
 
+# The native search route accepts 2–100 characters (``len`` of the stripped
+# query) and rejects anything longer with 400 before this policy. No caller
+# reachable in the release sends a longer query, so the same bound keeps the
+# screening cost finite for every service-level and transport caller.
+MAX_QUERY_CHARS = 100
+
 # Rule labels (the only diagnostic vocabulary).
+LENGTH = "length"                            # bound, before R0
 CONTROL = "control"                          # R0
 NO_LETTER = "no_letter"                      # R1
 EMAIL_OR_HANDLE = "email_or_handle"          # R2
@@ -33,7 +45,7 @@ URL = "url"                                  # R3
 LONG_NUMBER = "long_number"                  # R4
 CONTACT_KEYWORD = "contact_keyword"          # R5
 FIRST_PERSON_HEALTH = "first_person_health"  # R6
-RULES = (CONTROL, NO_LETTER, EMAIL_OR_HANDLE, URL, LONG_NUMBER,
+RULES = (LENGTH, CONTROL, NO_LETTER, EMAIL_OR_HANDLE, URL, LONG_NUMBER,
          CONTACT_KEYWORD, FIRST_PERSON_HEALTH)
 LONG_NUMBER_DIGITS = 7
 
@@ -48,7 +60,7 @@ _CONTACT = re.compile(
 _FIRST_PERSON = re.compile(
     r"\b(?:i|i'm|im|i've|ive|my|me|myself|ben|benim|bana|beni|bende|bence|annem|babam|esim|oglum|kizim)\b")
 _HEALTH = re.compile(
-    r"\b(?:diabet\w*|doctor|doktor\w*|diagnos\w*|teshis\w*|tani\w*|disease|hastalig\w*|hasta\w*|"
+    r"\b(?:diabet\w*|diyabet\w*|doctor|doktor\w*|diagnos\w*|teshis\w*|tani\w*|disease|hastalig\w*|hasta\w*|"
     r"medication\w*|medicine|ilac\w*|pill\w*|insulin|insulin\w*|blood sugar|kan sekeri\w*|"
     r"pregnan\w*|hamile\w*|allerg\w*|alerji\w*|surgery|ameliyat\w*|treatment|tedavi\w*|"
     r"prescri\w*|recete\w*|mg/dl|mmol|chemo\w*|kemoterapi\w*|hiv|cancer|kanser\w*|"
@@ -86,9 +98,13 @@ def withheld_search_rule(query):
     """The rule label when ``query`` must not leave AxisAI, else ``None``.
 
     A non-``str`` query is withheld (``control``): only text can be screened.
+    A query longer than ``MAX_QUERY_CHARS`` is withheld (``length``) before
+    any normalisation or regex, so the work per call is bounded.
     """
     if not isinstance(query, str):
         return CONTROL
+    if len(query) > MAX_QUERY_CHARS:
+        return LENGTH
     if any(unicodedata.category(ch) == "Cc" for ch in query):
         return CONTROL
     folded = _fold(query)

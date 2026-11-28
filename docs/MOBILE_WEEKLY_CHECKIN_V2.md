@@ -147,6 +147,9 @@ adherence representation, so a rollout change cannot reinterpret a retry.
   (`160c887768be1eb08375ba82a7a0a2e09c6c9386`) with PD5
   `c8e1f3a5b702` after W1/W2 `b7d2e9f4a1c3`, followed by PD6
   `e6a4b91d702c`. Existing G4, PD1 and PD2 revisions retain their lineage.
+  The accepted composed lineage (final isolated integration #573) continues
+  `e6a4b91d702c → 6e25ecb68c09 → f14209ba73c6`. The single Alembic head is
+  `f14209ba73c6`.
 - Full check-ins continue to derive the applicable calorie target through
   `account_profile.derive_targets_for_weight` in the canonical writer.
   Weight, target and the original response snapshot commit together.
