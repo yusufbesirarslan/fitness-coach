@@ -465,7 +465,7 @@ def test_no_event_leaves_after_a_withdrawal_committed_even_with_a_racing_emit(pg
         db.session.add(ProductAnalyticsOutbox(
             user_id=1, generation=old_generation, subject=old_subject, event_id=str(uuid.uuid4()),
             name="axis_v2_app_resumed", authority="client", occurred_at=now, received_at=now,
-            properties="{}", attempts=0, next_attempt_at=now))
+            properties="{}", attempts=0, next_attempt_at=now - timedelta(minutes=1)))
         db.session.commit()
 
     def before_outbox_lock(state):
